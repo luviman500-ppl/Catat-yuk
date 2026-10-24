@@ -1,19 +1,9 @@
-{
-  "name": "catat-yuk",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
-  "scripts": {
-    "build": "vite build"
-  },
-  "dependencies": {
-    "firebase": "^10.12.0",
-    "lucide-react": "^0.380.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.0",
-    "vite": "^5.2.11"
-  }
-}
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.jsx'
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+)
