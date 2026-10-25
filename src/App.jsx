@@ -24,16 +24,14 @@ import {
 } from 'lucide-react';
 
 // --- FIREBASE CONFIGURATION & INITIALIZATION ---
-const firebaseConfig = typeof __firebase_config !== 'undefined' 
-  ? JSON.parse(__firebase_config) 
-  : {
-      apiKey: "demo-api-key",
-      authDomain: "demo-app.firebaseapp.com",
-      projectId: "demo-app",
-      storageBucket: "demo-app.appspot.com",
-      messagingSenderId: "123456789",
-      appId: "1:123456789:web:demo"
-    };
+const firebaseConfig = {
+  apiKey: "AIzaSyAeVO4WoFe8SyAxK2K8T_RWVDHbY0-hEkw",
+  authDomain: "catat-yuk-f7daa.firebaseapp.com",
+  projectId: "catat-yuk-f7daa",
+  storageBucket: "catat-yuk-f7daa.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "1:123456789:web:demo"
+};
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
