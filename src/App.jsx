@@ -8,6 +8,7 @@ import {
   updateDoc, 
   deleteDoc, 
   doc, 
+  setDoc,
   query, 
   orderBy, 
   serverTimestamp 
@@ -27,11 +28,13 @@ import {
   Search,
   Download,
   Filter,
-  BarChart3,
   Plus,
   Calculator,
   CalendarDays,
-  TrendingUp
+  Target,
+  AlertTriangle,
+  CheckCircle2,
+  PiggyBank
 } from 'lucide-react';
 
 // --- FIREBASE CONFIGURATION ---
@@ -53,11 +56,13 @@ const DEFAULT_INCOME_CATEGORIES = ['Gaji', 'Bonus', 'Freelance', 'Investasi', 'H
 
 export default function App() {
   const [transactions, setTransactions] = useState([]);
+  const [monthlyBudget, setMonthlyBudget] = useState(0);
   const [loading, setLoading] = useState(true);
   
   // Navigation & Modal States
-  const [activeTab, setActiveTab] = useState('beranda');
+  const [activeTab, setActiveTab] = useState('beranda'); // 'beranda', 'anggaran', 'riwayat'
   const [showModal, setShowModal] = useState(false);
+  const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
 
   // Form States
@@ -69,6 +74,9 @@ export default function App() {
   const [customCategory, setCustomCategory] = useState('');
   const [isCustomCategory, setIsCustomCategory] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // Budget Input State
+  const [inputBudget, setInputBudget] = useState('');
 
   // Calculator State
   const [showCalculator, setShowCalculator] = useState(false);
@@ -84,10 +92,11 @@ export default function App() {
   const [filterCategory, setFilterCategory] = useState('Semua');
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
 
-  // Realtime Sync Firestore
+  // Realtime Sync Firestore - Transaksi & Budget
   useEffect(() => {
+    // 1. Sync Transaksi
     const q = query(collection(db, "transactions"), orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribeTransactions = onSnapshot(q, (snapshot) => {
       const docs = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
@@ -116,8 +125,41 @@ export default function App() {
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    // 2. Sync Anggaran Bulanan
+    const unsubscribeBudget = onSnapshot(doc(db, "settings", "monthlyBudget"), (docSnap) => {
+      if (docSnap.exists()) {
+        const bVal = docSnap.data().amount || 0;
+        setMonthlyBudget(bVal);
+        setInputBudget(bVal.toString());
+      } else {
+        setMonthlyBudget(0);
+        setInputBudget('');
+      }
+    });
+
+    return () => {
+      unsubscribeTransactions();
+      unsubscribeBudget();
+    };
   }, []);
+
+  // Simpan Target Anggaran
+  const handleSaveBudget = async (e) => {
+    e.preventDefault();
+    const val = Number(inputBudget);
+    if (isNaN(val) || val < 0) return;
+
+    try {
+      await setDoc(doc(db, "settings", "monthlyBudget"), {
+        amount: val,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      setShowBudgetModal(false);
+    } catch (error) {
+      console.error("Error setting budget:", error);
+      alert("Gagal menyimpan anggaran.");
+    }
+  };
 
   // Ubah Tipe Transaksi (Pengeluaran / Pemasukan)
   const handleTypeChange = (newType) => {
@@ -317,62 +359,38 @@ export default function App() {
       });
   }, [transactions]);
 
-  // Data Grafik 7 Hari Terakhir
-  const last7DaysData = useMemo(() => {
-    const result = [];
-    const today = new Date();
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(today.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
-      const dayName = d.toLocaleDateString('id-ID', { weekday: 'short' });
-      const dayNum = d.getDate();
+  // Kalkulasi Ringkasan & Budgeting
+  const todayTransactions = transactions.filter(t => t.date === todayStr);
+  const todayIncome = todayTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
+  const todayExpense = todayTransactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
 
-      const dayItems = transactions.filter(t => t.date === dateStr);
-      const inc = dayItems.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-      const exp = dayItems.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+  const monthTransactions = transactions.filter(t => t.date && t.date.startsWith(filterMonth));
+  const monthIncome = monthTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
+  const monthExpense = monthTransactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
 
-      result.push({
-        dateStr,
-        label: `${dayName} ${dayNum}`,
-        income: inc,
-        expense: exp
-      });
-    }
-    return result;
-  }, [transactions]);
+  const papaMonthExpense = monthTransactions.filter(t => t.type === 'expense' && t.user === 'Papa').reduce((sum, t) => sum + t.amount, 0);
+  const mamaMonthExpense = monthTransactions.filter(t => t.type === 'expense' && t.user === 'Mama').reduce((sum, t) => sum + t.amount, 0);
+  
+  const papaPercent = monthExpense > 0 ? Math.round((papaMonthExpense / monthExpense) * 100) : 0;
+  const mamaPercent = monthExpense > 0 ? Math.round((mamaMonthExpense / monthExpense) * 100) : 0;
 
-  const max7DaysVal = useMemo(() => {
-    const max = Math.max(...last7DaysData.map(d => Math.max(d.income, d.expense)), 100000);
-    return max;
-  }, [last7DaysData]);
+  // Budget Calculations
+  const budgetRemaining = monthlyBudget - monthExpense;
+  const budgetUsagePercent = monthlyBudget > 0 ? Math.min(Math.round((monthExpense / monthlyBudget) * 100), 100) : 0;
+  const isOverBudget = monthlyBudget > 0 && monthExpense > monthlyBudget;
 
-  // Data Grafik 6 Bulan Terakhir
-  const last6MonthsData = useMemo(() => {
-    const result = [];
-    const now = new Date();
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const monthStr = d.toISOString().slice(0, 7);
-      const monthLabel = d.toLocaleDateString('id-ID', { month: 'short' });
+  // Group Expenses by Category
+  const categoryExpenses = useMemo(() => {
+    const map = {};
+    monthTransactions.filter(t => t.type === 'expense').forEach(t => {
+      map[t.category] = (map[t.category] || 0) + t.amount;
+    });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]);
+  }, [monthTransactions]);
 
-      const mItems = transactions.filter(t => t.date && t.date.startsWith(monthStr));
-      const inc = mItems.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-      const exp = mItems.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
-
-      result.push({
-        monthStr,
-        label: monthLabel,
-        income: inc,
-        expense: exp
-      });
-    }
-    return result;
-  }, [transactions]);
-
-  const max6MonthsVal = useMemo(() => {
-    return Math.max(...last6MonthsData.map(d => Math.max(d.income, d.expense)), 100000);
-  }, [last6MonthsData]);
+  const allUniqueCategories = useMemo(() => {
+    return Array.from(new Set([...expenseCategories, ...incomeCategories]));
+  }, [expenseCategories, incomeCategories]);
 
   // Kalkulasi Periode Minggu, Bulan, dan Tahun
   const periodTotals = useMemo(() => {
@@ -396,56 +414,26 @@ export default function App() {
     const weekIncome = weekTransactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
     const weekExpense = weekTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
 
-    // Rentang Bulan Ini
     const activeMonthStr = filterMonth || new Date().toISOString().slice(0, 7);
-    const monthTransactions = transactions.filter(t => t.date && t.date.startsWith(activeMonthStr));
-    const monthIncome = monthTransactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-    const monthExpense = monthTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    const mTransactions = transactions.filter(t => t.date && t.date.startsWith(activeMonthStr));
+    const mIncome = mTransactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+    const mExpense = mTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
 
-    // Rentang Tahun Ini
     const activeYearStr = activeMonthStr.split('-')[0];
-    const yearTransactions = transactions.filter(t => t.date && t.date.startsWith(activeYearStr));
-    const yearIncome = yearTransactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-    const yearExpense = yearTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    const yTransactions = transactions.filter(t => t.date && t.date.startsWith(activeYearStr));
+    const yIncome = yTransactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+    const yExpense = yTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
 
     return {
       weekIncome,
       weekExpense,
-      monthIncome,
-      monthExpense,
-      yearIncome,
-      yearExpense,
+      monthIncome: mIncome,
+      monthExpense: mExpense,
+      yearIncome: yIncome,
+      yearExpense: yExpense,
       activeYearStr
     };
   }, [transactions, filterMonth]);
-
-  // Kalkulasi Ringkasan Beranda
-  const todayTransactions = transactions.filter(t => t.date === todayStr);
-  const todayIncome = todayTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
-  const todayExpense = todayTransactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
-
-  const monthTransactions = transactions.filter(t => t.date && t.date.startsWith(filterMonth));
-  const monthIncome = monthTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
-  const monthExpense = monthTransactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
-
-  const papaMonthExpense = monthTransactions.filter(t => t.type === 'expense' && t.user === 'Papa').reduce((sum, t) => sum + t.amount, 0);
-  const mamaMonthExpense = monthTransactions.filter(t => t.type === 'expense' && t.user === 'Mama').reduce((sum, t) => sum + t.amount, 0);
-  
-  const papaPercent = monthExpense > 0 ? Math.round((papaMonthExpense / monthExpense) * 100) : 0;
-  const mamaPercent = monthExpense > 0 ? Math.round((mamaMonthExpense / monthExpense) * 100) : 0;
-
-  // Group Expenses by Category
-  const categoryExpenses = useMemo(() => {
-    const map = {};
-    monthTransactions.filter(t => t.type === 'expense').forEach(t => {
-      map[t.category] = (map[t.category] || 0) + t.amount;
-    });
-    return Object.entries(map).sort((a, b) => b[1] - a[1]);
-  }, [monthTransactions]);
-
-  const allUniqueCategories = useMemo(() => {
-    return Array.from(new Set([...expenseCategories, ...incomeCategories]));
-  }, [expenseCategories, incomeCategories]);
 
   return (
     <div className="min-h-screen bg-slate-100 pb-28 text-slate-800 font-sans max-w-md mx-auto relative shadow-2xl border-x">
@@ -501,6 +489,29 @@ export default function App() {
       {/* Main Content Area */}
       {activeTab === 'beranda' && (
         <div className="p-4 space-y-4">
+          {/* Status Singkat Anggaran di Beranda */}
+          {monthlyBudget > 0 && (
+            <div className="bg-white p-3.5 rounded-2xl border shadow-sm flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className={`p-2 rounded-xl ${isOverBudget ? 'bg-rose-100 text-rose-600' : 'bg-teal-100 text-teal-600'}`}>
+                  <Target size={18} />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase">Sisa Anggaran Bulan Ini</p>
+                  <p className={`text-xs font-bold ${isOverBudget ? 'text-rose-600' : 'text-slate-800'}`}>
+                    {isOverBudget ? `Overbudget ${formatRupiah(Math.abs(budgetRemaining))}` : formatRupiah(budgetRemaining)}
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setActiveTab('anggaran')}
+                className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-xl font-bold transition"
+              >
+                Detail
+              </button>
+            </div>
+          )}
+
           {/* Breakdown Papa vs Mama */}
           <div className="bg-white p-4 rounded-2xl shadow-sm border">
             <div className="flex justify-between items-center mb-2">
@@ -595,124 +606,119 @@ export default function App() {
         </div>
       )}
 
-      {/* Tab Grafik & Statistik */}
-      {activeTab === 'statistik' && (
+      {/* Tab Anggaran (Budgeting Dashboard) */}
+      {activeTab === 'anggaran' && (
         <div className="p-4 space-y-4">
-          <div className="flex items-center justify-between bg-white p-3 rounded-2xl border shadow-sm">
-            <span className="text-xs font-bold text-slate-600 flex items-center gap-1">
-              <Calendar size={14} /> Pilih Bulan Detail
-            </span>
-            <input 
-              type="month" 
-              value={filterMonth}
-              onChange={(e) => setFilterMonth(e.target.value)}
-              className="text-xs font-semibold bg-slate-100 p-1.5 rounded-lg border focus:outline-teal-500"
-            />
-          </div>
-
-          {/* Grafik 1: Perbandingan 7 Hari Terakhir */}
+          {/* Card Target & Sisa Anggaran */}
           <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
             <div className="flex justify-between items-center">
               <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                <TrendingUp size={14} /> Grafik 7 Hari Terakhir
+                <Target size={14} /> Batas Anggaran Bulanan
               </h3>
-              <div className="flex items-center gap-2 text-[10px] font-semibold">
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span> Masuk</span>
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-rose-500"></span> Keluar</span>
+              <button 
+                onClick={() => setShowBudgetModal(true)}
+                className="text-xs text-teal-600 font-bold hover:underline"
+              >
+                {monthlyBudget > 0 ? 'Ubah Target' : '+ Atur Anggaran'}
+              </button>
+            </div>
+
+            {monthlyBudget === 0 ? (
+              <div className="text-center py-6 border border-dashed rounded-2xl bg-slate-50 p-4 space-y-2">
+                <PiggyBank size={32} className="mx-auto text-slate-400" />
+                <p className="text-xs font-semibold text-slate-600">Belum ada batas anggaran yang diatur.</p>
+                <button 
+                  onClick={() => setShowBudgetModal(true)}
+                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition shadow"
+                >
+                  Atur Target Anggaran Sekarang
+                </button>
               </div>
-            </div>
-
-            <div className="h-44 w-full pt-4 pb-2 flex items-end justify-between gap-1.5 border-b">
-              {last7DaysData.map((d) => {
-                const incHeight = (d.income / max7DaysVal) * 100;
-                const expHeight = (d.expense / max7DaysVal) * 100;
-
-                return (
-                  <div key={d.dateStr} className="flex-1 flex flex-col items-center h-full justify-end group relative">
-                    <div className="hidden group-hover:flex flex-col absolute -top-12 bg-slate-800 text-white text-[9px] p-1.5 rounded-lg shadow-lg z-10 whitespace-nowrap pointer-events-none">
-                      <span className="font-bold">{d.label}</span>
-                      <span className="text-emerald-300">Masuk: {formatRupiah(d.income)}</span>
-                      <span className="text-rose-300">Keluar: {formatRupiah(d.expense)}</span>
-                    </div>
-
-                    <div className="w-full flex items-end justify-center gap-1 h-32">
-                      <div 
-                        style={{ height: `${Math.max(incHeight, d.income > 0 ? 6 : 0)}%` }} 
-                        className="w-1/2 bg-emerald-500 rounded-t-sm transition-all duration-300"
-                      ></div>
-                      <div 
-                        style={{ height: `${Math.max(expHeight, d.expense > 0 ? 6 : 0)}%` }} 
-                        className="w-1/2 bg-rose-500 rounded-t-sm transition-all duration-300"
-                      ></div>
-                    </div>
-                    <span className="text-[10px] font-medium text-slate-500 mt-2 truncate w-full text-center">{d.label}</span>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="bg-slate-50 p-3 rounded-xl border">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold block">Target Pagu</span>
+                    <span className="text-sm font-bold text-slate-800">{formatRupiah(monthlyBudget)}</span>
                   </div>
-                );
-              })}
-            </div>
+                  <div className="bg-slate-50 p-3 rounded-xl border">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold block">Terpakai</span>
+                    <span className="text-sm font-bold text-rose-600">{formatRupiah(monthExpense)}</span>
+                  </div>
+                </div>
+
+                {/* Progress Bar Indikator */}
+                <div>
+                  <div className="flex justify-between text-xs font-bold mb-1">
+                    <span>Penggunaan Anggaran</span>
+                    <span className={isOverBudget ? 'text-rose-600' : 'text-teal-600'}>
+                      {budgetUsagePercent}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-100 h-3.5 rounded-full overflow-hidden p-0.5 border">
+                    <div 
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        isOverBudget 
+                          ? 'bg-rose-500' 
+                          : budgetUsagePercent > 80 
+                          ? 'bg-amber-500' 
+                          : 'bg-teal-500'
+                      }`}
+                      style={{ width: `${budgetUsagePercent}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                {/* Warning / Status Banner */}
+                <div className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+                  isOverBudget 
+                    ? 'bg-rose-50 text-rose-700 border border-rose-200' 
+                    : budgetUsagePercent > 80 
+                    ? 'bg-amber-50 text-amber-800 border border-amber-200' 
+                    : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                }`}>
+                  {isOverBudget ? (
+                    <>
+                      <AlertTriangle size={18} className="shrink-0 text-rose-600" />
+                      <span><strong>Overbudget!</strong> Pengeluaran melebihi anggaran sebesar {formatRupiah(Math.abs(budgetRemaining))}.</span>
+                    </>
+                  ) : budgetUsagePercent > 80 ? (
+                    <>
+                      <AlertTriangle size={18} className="shrink-0 text-amber-600" />
+                      <span><strong>Waspada!</strong> Pengeluaran sudah terpakai {budgetUsagePercent}%. Sisa anggaran: {formatRupiah(budgetRemaining)}.</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={18} className="shrink-0 text-emerald-600" />
+                      <span><strong>Aman!</strong> Sisa anggaran bulan ini: {formatRupiah(budgetRemaining)}.</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Grafik 2: Tren 6 Bulan Terakhir */}
+          {/* Penggunaan Anggaran per Kategori */}
           <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
-            <div className="flex justify-between items-center">
-              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                <BarChart3 size={14} /> Grafik Tren 6 Bulan Terakhir
-              </h3>
-              <div className="flex items-center gap-2 text-[10px] font-semibold">
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span> Masuk</span>
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-rose-500"></span> Keluar</span>
-              </div>
-            </div>
-
-            <div className="h-44 w-full pt-4 pb-2 flex items-end justify-between gap-2 border-b">
-              {last6MonthsData.map((d) => {
-                const incHeight = (d.income / max6MonthsVal) * 100;
-                const expHeight = (d.expense / max6MonthsVal) * 100;
-
-                return (
-                  <div key={d.monthStr} className="flex-1 flex flex-col items-center h-full justify-end group relative">
-                    <div className="hidden group-hover:flex flex-col absolute -top-12 bg-slate-800 text-white text-[9px] p-1.5 rounded-lg shadow-lg z-10 whitespace-nowrap pointer-events-none">
-                      <span className="font-bold">{d.label}</span>
-                      <span className="text-emerald-300">Masuk: {formatRupiah(d.income)}</span>
-                      <span className="text-rose-300">Keluar: {formatRupiah(d.expense)}</span>
-                    </div>
-
-                    <div className="w-full flex items-end justify-center gap-1 h-32">
-                      <div 
-                        style={{ height: `${Math.max(incHeight, d.income > 0 ? 6 : 0)}%` }} 
-                        className="w-1/2 bg-emerald-500 rounded-t-sm transition-all duration-300"
-                      ></div>
-                      <div 
-                        style={{ height: `${Math.max(expHeight, d.expense > 0 ? 6 : 0)}%` }} 
-                        className="w-1/2 bg-rose-500 rounded-t-sm transition-all duration-300"
-                      ></div>
-                    </div>
-                    <span className="text-[10px] font-medium text-slate-500 mt-2 truncate w-full text-center">{d.label}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Grafik 3: Pengeluaran per Kategori */}
-          <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-              <PieChart size={14} /> Pengeluaran per Kategori ({filterMonth})
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+              Pemakaian per Kategori ({filterMonth})
             </h3>
 
             {categoryExpenses.length === 0 ? (
               <p className="text-xs text-slate-400 text-center py-4">Belum ada pengeluaran di bulan ini.</p>
             ) : (
               categoryExpenses.map(([cat, total]) => {
-                const percent = Math.round((total / monthExpense) * 100) || 0;
+                const percentOfBudget = monthlyBudget > 0 ? Math.round((total / monthlyBudget) * 100) : 0;
                 return (
                   <div key={cat} className="space-y-1">
                     <div className="flex justify-between text-xs font-medium">
                       <span className="text-slate-700">{cat}</span>
-                      <span className="font-bold text-slate-800">{formatRupiah(total)} ({percent}%)</span>
+                      <span className="font-bold text-slate-800">
+                        {formatRupiah(total)} {monthlyBudget > 0 && <span className="text-slate-400 font-normal">({percentOfBudget}% pagu)</span>}
+                      </span>
                     </div>
-                    <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                      <div className="bg-teal-500 h-full rounded-full transition-all duration-300" style={{ width: `${percent}%` }}></div>
+                    <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                      <div className="bg-teal-500 h-full rounded-full transition-all duration-300" style={{ width: `${Math.min(percentOfBudget, 100)}%` }}></div>
                     </div>
                   </div>
                 );
@@ -855,10 +861,10 @@ export default function App() {
         </button>
 
         <button 
-          onClick={() => setActiveTab('statistik')}
-          className={`flex flex-col items-center gap-1 p-2 rounded-xl text-xs font-semibold ${activeTab === 'statistik' ? 'text-teal-600' : 'text-slate-400'}`}
+          onClick={() => setActiveTab('anggaran')}
+          className={`flex flex-col items-center gap-1 p-2 rounded-xl text-xs font-semibold ${activeTab === 'anggaran' ? 'text-teal-600' : 'text-slate-400'}`}
         >
-          <PieChart size={20} /> Grafik
+          <Target size={20} /> Anggaran
         </button>
 
         <button 
@@ -875,6 +881,52 @@ export default function App() {
           <List size={20} /> Riwayat
         </button>
       </div>
+
+      {/* Modal Atur Anggaran */}
+      {showBudgetModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-in fade-in duration-200">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-base font-bold text-slate-800">Target Anggaran Bulanan</h3>
+              <button onClick={() => setShowBudgetModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveBudget} className="space-y-4">
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">
+                  Batas Maksimal Pengeluaran (Rp)
+                </label>
+                <input 
+                  type="number" 
+                  placeholder="Contoh: 5000000"
+                  value={inputBudget}
+                  onChange={(e) => setInputBudget(e.target.value)}
+                  className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
+                  required
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button 
+                  type="button" 
+                  onClick={() => setShowBudgetModal(false)}
+                  className="w-1/2 py-2.5 border rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"
+                >
+                  Batal
+                </button>
+                <button 
+                  type="submit"
+                  className="w-1/2 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs shadow-md transition"
+                >
+                  Simpan Target
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Modal Input & Edit Transaksi */}
       {showModal && (
@@ -1010,40 +1062,4 @@ export default function App() {
                 {showCalculator && (
                   <div className="mt-2.5 p-2.5 bg-slate-100 rounded-2xl border text-xs shadow-inner space-y-2">
                     <div className="bg-white p-2 rounded-xl text-right font-mono text-xs text-slate-600 border truncate min-h-[32px]">
-                      {calcExpr || '0'}
-                    </div>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      {['7','8','9','/','4','5','6','*','1','2','3','-','C','0','=','+'].map((btn) => (
-                        <button
-                          key={btn}
-                          type="button"
-                          onClick={() => handleCalcButton(btn)}
-                          className={`p-2.5 rounded-xl font-bold transition active:scale-95 ${
-                            ['/','*','-','+','='].includes(btn) 
-                              ? 'bg-teal-600 text-white' 
-                              : btn === 'C' 
-                              ? 'bg-rose-500 text-white' 
-                              : 'bg-white text-slate-700 hover:bg-slate-200 border'
-                          }`}
-                        >
-                          {btn}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <button 
-                type="submit"
-                className="w-full py-3 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs shadow-md transition"
-              >
-                {editingId ? 'Simpan Perubahan' : 'Tambah Transaksi'}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+                      {calc
