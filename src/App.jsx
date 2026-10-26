@@ -1062,4 +1062,40 @@ export default function App() {
                 {showCalculator && (
                   <div className="mt-2.5 p-2.5 bg-slate-100 rounded-2xl border text-xs shadow-inner space-y-2">
                     <div className="bg-white p-2 rounded-xl text-right font-mono text-xs text-slate-600 border truncate min-h-[32px]">
-                      {calc
+                      {calcExpr || '0'}
+                    </div>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {['7','8','9','/','4','5','6','*','1','2','3','-','C','0','=','+'].map((btn) => (
+                        <button
+                          key={btn}
+                          type="button"
+                          onClick={() => handleCalcButton(btn)}
+                          className={`p-2.5 rounded-xl font-bold transition active:scale-95 ${
+                            ['/','*','-','+','='].includes(btn) 
+                              ? 'bg-teal-600 text-white' 
+                              : btn === 'C' 
+                              ? 'bg-rose-500 text-white' 
+                              : 'bg-white text-slate-700 hover:bg-slate-200 border'
+                          }`}
+                        >
+                          {btn}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <button 
+                type="submit"
+                className="w-full py-3 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs shadow-md transition"
+              >
+                {editingId ? 'Simpan Perubahan' : 'Tambah Transaksi'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
