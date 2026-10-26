@@ -58,7 +58,7 @@ export default function App() {
   const [editingId, setEditingId] = useState(null);
 
   // Form States
-  const [type, setType] = useState('expense'); // 'expense' atau 'income'
+  const [type, setType] = useState('expense');
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [user, setUser] = useState('Papa');
@@ -87,7 +87,6 @@ export default function App() {
       }));
       setTransactions(docs);
 
-      // Kumpulkan kategori dinamis terpisah antara pengeluaran dan pemasukan
       const dynamicExpense = new Set(DEFAULT_EXPENSE_CATEGORIES);
       const dynamicIncome = new Set(DEFAULT_INCOME_CATEGORIES);
 
@@ -255,6 +254,32 @@ export default function App() {
     });
   }, [transactions, searchTerm, filterUser, filterCategory, filterMonth]);
 
+  // Kelompokkan Transaksi per Tanggal untuk Beranda
+  const groupedTransactions = useMemo(() => {
+    const groups = {};
+    transactions.forEach(t => {
+      const dateKey = t.date || 'Lainnya';
+      if (!groups[dateKey]) {
+        groups[dateKey] = [];
+      }
+      groups[dateKey].push(t);
+    });
+
+    return Object.keys(groups)
+      .sort((a, b) => new Date(b) - new Date(a))
+      .map(dateKey => {
+        const list = groups[dateKey];
+        const income = list.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
+        const expense = list.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
+        return {
+          date: dateKey,
+          items: list,
+          income,
+          expense
+        };
+      });
+  }, [transactions]);
+
   // Kalkulasi Ringkasan
   const todayTransactions = transactions.filter(t => t.date === todayStr);
   const todayIncome = todayTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
@@ -355,11 +380,11 @@ export default function App() {
             </div>
           </div>
 
-          {/* Transaksi Terakhir */}
+          {/* Transaksi Dikelompokkan Per Tanggal */}
           <div>
             <div className="flex justify-between items-center mb-3">
               <h3 className="text-sm font-bold text-slate-700 flex items-center gap-1">
-                <List size={16} /> Catatan Terakhir
+                <Calendar size={16} /> Catatan Per Hari
               </h3>
               <button 
                 onClick={() => setActiveTab('riwayat')} 
@@ -371,37 +396,56 @@ export default function App() {
 
             {loading ? (
               <p className="text-center text-xs text-slate-400 py-6">Memuat data...</p>
-            ) : transactions.length === 0 ? (
+            ) : groupedTransactions.length === 0 ? (
               <div className="text-center py-8 bg-white rounded-2xl border p-4">
                 <p className="text-sm font-semibold text-slate-600">Belum ada catatan</p>
                 <p className="text-xs text-slate-400 mt-1">Tekan tombol (+) di bawah untuk mulai mencatat.</p>
               </div>
             ) : (
-              <div className="space-y-2">
-                {transactions.slice(0, 5).map((t) => (
-                  <div key={t.id} className="bg-white p-3.5 rounded-2xl border flex justify-between items-center shadow-sm">
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2.5 rounded-xl ${t.type === 'income' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-                        {t.type === 'income' ? <ArrowDownCircle size={20} /> : <ArrowUpCircle size={20} />}
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-bold text-slate-800">{t.title}</h4>
-                        <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5">
-                          <span className={`font-semibold ${t.user === 'Papa' ? 'text-indigo-600' : 'text-pink-600'}`}>{t.user}</span>
-                          <span>•</span>
-                          <span>{t.category}</span>
-                          <span>•</span>
-                          <span>{t.date}</span>
-                        </div>
+              <div className="space-y-4">
+                {groupedTransactions.slice(0, 5).map((group) => (
+                  <div key={group.date} className="space-y-2">
+                    {/* Header Tanggal + Total Pengeluaran & Pemasukan Hari Itu */}
+                    <div className="flex justify-between items-center bg-slate-200/60 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-600">
+                      <span className="flex items-center gap-1.5">
+                        {group.date === todayStr && (
+                          <span className="bg-teal-600 text-white text-[10px] px-2 py-0.5 rounded-md font-bold">Hari Ini</span>
+                        )}
+                        <span>{group.date}</span>
+                      </span>
+                      <div className="flex items-center gap-2 text-[11px]">
+                        {group.income > 0 && <span className="text-emerald-600 font-bold">+{formatRupiah(group.income)}</span>}
+                        {group.expense > 0 && <span className="text-rose-600 font-bold">-{formatRupiah(group.expense)}</span>}
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className={`text-sm font-bold ${t.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                        {t.type === 'income' ? '+' : '-'}{formatRupiah(t.amount)}
-                      </span>
-                      <button onClick={() => openEditModal(t)} className="text-slate-300 hover:text-teal-600 p-1">
-                        <Edit2 size={15} />
-                      </button>
+
+                    {/* Transaksi di Tanggal Tersebut */}
+                    <div className="space-y-2">
+                      {group.items.map((t) => (
+                        <div key={t.id} className="bg-white p-3.5 rounded-2xl border flex justify-between items-center shadow-sm">
+                          <div className="flex items-center gap-3">
+                            <div className={`p-2.5 rounded-xl ${t.type === 'income' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                              {t.type === 'income' ? <ArrowDownCircle size={20} /> : <ArrowUpCircle size={20} />}
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-bold text-slate-800">{t.title}</h4>
+                              <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5">
+                                <span className={`font-semibold ${t.user === 'Papa' ? 'text-indigo-600' : 'text-pink-600'}`}>{t.user}</span>
+                                <span>•</span>
+                                <span>{t.category}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-sm font-bold ${t.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                              {t.type === 'income' ? '+' : '-'}{formatRupiah(t.amount)}
+                            </span>
+                            <button onClick={() => openEditModal(t)} className="text-slate-300 hover:text-teal-600 p-1">
+                              <Edit2 size={15} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 ))}
