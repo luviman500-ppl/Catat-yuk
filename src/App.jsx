@@ -29,7 +29,9 @@ import {
   Filter,
   BarChart3,
   Plus,
-  Calculator
+  Calculator,
+  CalendarDays,
+  TrendingUp
 } from 'lucide-react';
 
 // --- FIREBASE CONFIGURATION ---
@@ -315,7 +317,109 @@ export default function App() {
       });
   }, [transactions]);
 
-  // Kalkulasi Ringkasan
+  // Data Grafik 7 Hari Terakhir
+  const last7DaysData = useMemo(() => {
+    const result = [];
+    const today = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const dayName = d.toLocaleDateString('id-ID', { weekday: 'short' });
+      const dayNum = d.getDate();
+
+      const dayItems = transactions.filter(t => t.date === dateStr);
+      const inc = dayItems.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+      const exp = dayItems.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+
+      result.push({
+        dateStr,
+        label: `${dayName} ${dayNum}`,
+        income: inc,
+        expense: exp
+      });
+    }
+    return result;
+  }, [transactions]);
+
+  const max7DaysVal = useMemo(() => {
+    const max = Math.max(...last7DaysData.map(d => Math.max(d.income, d.expense)), 100000);
+    return max;
+  }, [last7DaysData]);
+
+  // Data Grafik 6 Bulan Terakhir
+  const last6MonthsData = useMemo(() => {
+    const result = [];
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthStr = d.toISOString().slice(0, 7);
+      const monthLabel = d.toLocaleDateString('id-ID', { month: 'short' });
+
+      const mItems = transactions.filter(t => t.date && t.date.startsWith(monthStr));
+      const inc = mItems.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+      const exp = mItems.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+
+      result.push({
+        monthStr,
+        label: monthLabel,
+        income: inc,
+        expense: exp
+      });
+    }
+    return result;
+  }, [transactions]);
+
+  const max6MonthsVal = useMemo(() => {
+    return Math.max(...last6MonthsData.map(d => Math.max(d.income, d.expense)), 100000);
+  }, [last6MonthsData]);
+
+  // Kalkulasi Periode Minggu, Bulan, dan Tahun
+  const periodTotals = useMemo(() => {
+    const now = new Date();
+    
+    // Rentang Minggu Ini (Senin sampai Minggu)
+    const currentDay = now.getDay();
+    const diffToMon = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1);
+    const monday = new Date(now.setDate(diffToMon));
+    monday.setHours(0, 0, 0, 0);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23, 59, 59, 999);
+
+    const weekTransactions = transactions.filter(t => {
+      if (!t.date) return false;
+      const d = new Date(t.date);
+      return d >= monday && d <= sunday;
+    });
+
+    const weekIncome = weekTransactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+    const weekExpense = weekTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+
+    // Rentang Bulan Ini
+    const activeMonthStr = filterMonth || new Date().toISOString().slice(0, 7);
+    const monthTransactions = transactions.filter(t => t.date && t.date.startsWith(activeMonthStr));
+    const monthIncome = monthTransactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+    const monthExpense = monthTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+
+    // Rentang Tahun Ini
+    const activeYearStr = activeMonthStr.split('-')[0];
+    const yearTransactions = transactions.filter(t => t.date && t.date.startsWith(activeYearStr));
+    const yearIncome = yearTransactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+    const yearExpense = yearTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+
+    return {
+      weekIncome,
+      weekExpense,
+      monthIncome,
+      monthExpense,
+      yearIncome,
+      yearExpense,
+      activeYearStr
+    };
+  }, [transactions, filterMonth]);
+
+  // Kalkulasi Ringkasan Beranda
   const todayTransactions = transactions.filter(t => t.date === todayStr);
   const todayIncome = todayTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
   const todayExpense = todayTransactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
@@ -440,7 +544,6 @@ export default function App() {
               <div className="space-y-4">
                 {groupedTransactions.slice(0, 5).map((group) => (
                   <div key={group.date} className="space-y-2">
-                    {/* Header Tanggal + Total Pengeluaran & Pemasukan Hari Itu */}
                     <div className="flex justify-between items-center bg-slate-200/60 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-600">
                       <span className="flex items-center gap-1.5">
                         {group.date === todayStr && (
@@ -454,7 +557,6 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Transaksi di Tanggal Tersebut */}
                     <div className="space-y-2">
                       {group.items.map((t) => (
                         <div key={t.id} className="bg-white p-3.5 rounded-2xl border flex justify-between items-center shadow-sm">
@@ -498,7 +600,7 @@ export default function App() {
         <div className="p-4 space-y-4">
           <div className="flex items-center justify-between bg-white p-3 rounded-2xl border shadow-sm">
             <span className="text-xs font-bold text-slate-600 flex items-center gap-1">
-              <Calendar size={14} /> Pilih Bulan
+              <Calendar size={14} /> Pilih Bulan Detail
             </span>
             <input 
               type="month" 
@@ -508,9 +610,94 @@ export default function App() {
             />
           </div>
 
+          {/* Grafik 1: Perbandingan 7 Hari Terakhir */}
+          <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
+            <div className="flex justify-between items-center">
+              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                <TrendingUp size={14} /> Grafik 7 Hari Terakhir
+              </h3>
+              <div className="flex items-center gap-2 text-[10px] font-semibold">
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span> Masuk</span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-rose-500"></span> Keluar</span>
+              </div>
+            </div>
+
+            <div className="h-44 w-full pt-4 pb-2 flex items-end justify-between gap-1.5 border-b">
+              {last7DaysData.map((d) => {
+                const incHeight = (d.income / max7DaysVal) * 100;
+                const expHeight = (d.expense / max7DaysVal) * 100;
+
+                return (
+                  <div key={d.dateStr} className="flex-1 flex flex-col items-center h-full justify-end group relative">
+                    <div className="hidden group-hover:flex flex-col absolute -top-12 bg-slate-800 text-white text-[9px] p-1.5 rounded-lg shadow-lg z-10 whitespace-nowrap pointer-events-none">
+                      <span className="font-bold">{d.label}</span>
+                      <span className="text-emerald-300">Masuk: {formatRupiah(d.income)}</span>
+                      <span className="text-rose-300">Keluar: {formatRupiah(d.expense)}</span>
+                    </div>
+
+                    <div className="w-full flex items-end justify-center gap-1 h-32">
+                      <div 
+                        style={{ height: `${Math.max(incHeight, d.income > 0 ? 6 : 0)}%` }} 
+                        className="w-1/2 bg-emerald-500 rounded-t-sm transition-all duration-300"
+                      ></div>
+                      <div 
+                        style={{ height: `${Math.max(expHeight, d.expense > 0 ? 6 : 0)}%` }} 
+                        className="w-1/2 bg-rose-500 rounded-t-sm transition-all duration-300"
+                      ></div>
+                    </div>
+                    <span className="text-[10px] font-medium text-slate-500 mt-2 truncate w-full text-center">{d.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Grafik 2: Tren 6 Bulan Terakhir */}
+          <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
+            <div className="flex justify-between items-center">
+              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                <BarChart3 size={14} /> Grafik Tren 6 Bulan Terakhir
+              </h3>
+              <div className="flex items-center gap-2 text-[10px] font-semibold">
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span> Masuk</span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-rose-500"></span> Keluar</span>
+              </div>
+            </div>
+
+            <div className="h-44 w-full pt-4 pb-2 flex items-end justify-between gap-2 border-b">
+              {last6MonthsData.map((d) => {
+                const incHeight = (d.income / max6MonthsVal) * 100;
+                const expHeight = (d.expense / max6MonthsVal) * 100;
+
+                return (
+                  <div key={d.monthStr} className="flex-1 flex flex-col items-center h-full justify-end group relative">
+                    <div className="hidden group-hover:flex flex-col absolute -top-12 bg-slate-800 text-white text-[9px] p-1.5 rounded-lg shadow-lg z-10 whitespace-nowrap pointer-events-none">
+                      <span className="font-bold">{d.label}</span>
+                      <span className="text-emerald-300">Masuk: {formatRupiah(d.income)}</span>
+                      <span className="text-rose-300">Keluar: {formatRupiah(d.expense)}</span>
+                    </div>
+
+                    <div className="w-full flex items-end justify-center gap-1 h-32">
+                      <div 
+                        style={{ height: `${Math.max(incHeight, d.income > 0 ? 6 : 0)}%` }} 
+                        className="w-1/2 bg-emerald-500 rounded-t-sm transition-all duration-300"
+                      ></div>
+                      <div 
+                        style={{ height: `${Math.max(expHeight, d.expense > 0 ? 6 : 0)}%` }} 
+                        className="w-1/2 bg-rose-500 rounded-t-sm transition-all duration-300"
+                      ></div>
+                    </div>
+                    <span className="text-[10px] font-medium text-slate-500 mt-2 truncate w-full text-center">{d.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Grafik 3: Pengeluaran per Kategori */}
           <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-              <BarChart3 size={14} /> Pengeluaran per Kategori
+              <PieChart size={14} /> Pengeluaran per Kategori ({filterMonth})
             </h3>
 
             {categoryExpenses.length === 0 ? (
@@ -524,8 +711,8 @@ export default function App() {
                       <span className="text-slate-700">{cat}</span>
                       <span className="font-bold text-slate-800">{formatRupiah(total)} ({percent}%)</span>
                     </div>
-                    <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                      <div className="bg-teal-500 h-full rounded-full" style={{ width: `${percent}%` }}></div>
+                    <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                      <div className="bg-teal-500 h-full rounded-full transition-all duration-300" style={{ width: `${percent}%` }}></div>
                     </div>
                   </div>
                 );
@@ -538,6 +725,34 @@ export default function App() {
       {/* Tab Riwayat & Pencarian */}
       {activeTab === 'riwayat' && (
         <div className="p-4 space-y-3">
+          {/* Ringkasan Per Minggu, Bulan, dan Tahun */}
+          <div className="bg-white p-3.5 rounded-2xl border shadow-sm space-y-2.5">
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+              <CalendarDays size={14} /> Rekap Keuangan Periode
+            </h3>
+
+            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+              <div className="bg-slate-50 p-2 rounded-xl border">
+                <span className="block text-[10px] font-bold text-slate-400 uppercase">Minggu Ini</span>
+                <p className="text-[11px] font-bold text-emerald-600 mt-1">+{formatRupiah(periodTotals.weekIncome)}</p>
+                <p className="text-[11px] font-bold text-rose-600">-{formatRupiah(periodTotals.weekExpense)}</p>
+              </div>
+
+              <div className="bg-slate-50 p-2 rounded-xl border">
+                <span className="block text-[10px] font-bold text-slate-400 uppercase">Bulan Ini</span>
+                <p className="text-[11px] font-bold text-emerald-600 mt-1">+{formatRupiah(periodTotals.monthIncome)}</p>
+                <p className="text-[11px] font-bold text-rose-600">-{formatRupiah(periodTotals.monthExpense)}</p>
+              </div>
+
+              <div className="bg-slate-50 p-2 rounded-xl border">
+                <span className="block text-[10px] font-bold text-slate-400 uppercase">Tahun ({periodTotals.activeYearStr})</span>
+                <p className="text-[11px] font-bold text-emerald-600 mt-1">+{formatRupiah(periodTotals.yearIncome)}</p>
+                <p className="text-[11px] font-bold text-rose-600">-{formatRupiah(periodTotals.yearExpense)}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Search Bar */}
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input 
@@ -549,6 +764,7 @@ export default function App() {
             />
           </div>
 
+          {/* Filter Bar */}
           <div className="bg-white p-3 rounded-2xl border shadow-sm space-y-2">
             <div className="flex items-center gap-1 text-xs font-bold text-slate-500">
               <Filter size={14} /> Filter Data
@@ -589,6 +805,7 @@ export default function App() {
             </button>
           </div>
 
+          {/* Transaksi Filtered */}
           <div className="space-y-2 pt-1">
             {filteredTransactions.length === 0 ? (
               <p className="text-center text-xs text-slate-400 py-8">Transaksi tidak ditemukan.</p>
@@ -641,7 +858,7 @@ export default function App() {
           onClick={() => setActiveTab('statistik')}
           className={`flex flex-col items-center gap-1 p-2 rounded-xl text-xs font-semibold ${activeTab === 'statistik' ? 'text-teal-600' : 'text-slate-400'}`}
         >
-          <PieChart size={20} /> Statistik
+          <PieChart size={20} /> Grafik
         </button>
 
         <button 
@@ -790,7 +1007,6 @@ export default function App() {
                   required
                 />
 
-                {/* Pad Kalkulator */}
                 {showCalculator && (
                   <div className="mt-2.5 p-2.5 bg-slate-100 rounded-2xl border text-xs shadow-inner space-y-2">
                     <div className="bg-white p-2 rounded-xl text-right font-mono text-xs text-slate-600 border truncate min-h-[32px]">
