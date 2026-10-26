@@ -44,19 +44,21 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-const DEFAULT_CATEGORIES = ['Makanan', 'Transportasi', 'Tagihan', 'Belanja', 'Kesehatan', 'Pendidikan', 'Hiburan', 'Lainnya'];
+// Kategori Bawaan Terpisah
+const DEFAULT_EXPENSE_CATEGORIES = ['Makanan', 'Transportasi', 'Tagihan', 'Belanja', 'Kesehatan', 'Pendidikan', 'Hiburan', 'Lainnya'];
+const DEFAULT_INCOME_CATEGORIES = ['Gaji', 'Bonus', 'Freelance', 'Investasi', 'Hadiah', 'Lainnya'];
 
 export default function App() {
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   
   // Navigation & Modal States
-  const [activeTab, setActiveTab] = useState('beranda'); // 'beranda', 'statistik', 'riwayat'
+  const [activeTab, setActiveTab] = useState('beranda');
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
 
   // Form States
-  const [type, setType] = useState('expense');
+  const [type, setType] = useState('expense'); // 'expense' atau 'income'
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [user, setUser] = useState('Papa');
@@ -65,14 +67,15 @@ export default function App() {
   const [isCustomCategory, setIsCustomCategory] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // Categories list state
-  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  // Categories list states
+  const [expenseCategories, setExpenseCategories] = useState(DEFAULT_EXPENSE_CATEGORIES);
+  const [incomeCategories, setIncomeCategories] = useState(DEFAULT_INCOME_CATEGORIES);
 
-  // Filter States (Riwayat & Statistik)
+  // Filter States
   const [searchTerm, setSearchTerm] = useState('');
   const [filterUser, setFilterUser] = useState('Semua');
   const [filterCategory, setFilterCategory] = useState('Semua');
-  const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+  const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
 
   // Realtime Sync Firestore
   useEffect(() => {
@@ -84,12 +87,22 @@ export default function App() {
       }));
       setTransactions(docs);
 
-      // Kumpulkan semua kategori unik (termasuk buatan user)
-      const dynamicCategories = new Set(DEFAULT_CATEGORIES);
+      // Kumpulkan kategori dinamis terpisah antara pengeluaran dan pemasukan
+      const dynamicExpense = new Set(DEFAULT_EXPENSE_CATEGORIES);
+      const dynamicIncome = new Set(DEFAULT_INCOME_CATEGORIES);
+
       docs.forEach(t => {
-        if (t.category) dynamicCategories.add(t.category);
+        if (t.category) {
+          if (t.type === 'income') {
+            dynamicIncome.add(t.category);
+          } else {
+            dynamicExpense.add(t.category);
+          }
+        }
       });
-      setCategories(Array.from(dynamicCategories));
+
+      setExpenseCategories(Array.from(dynamicExpense));
+      setIncomeCategories(Array.from(dynamicIncome));
 
       setLoading(false);
     }, (error) => {
@@ -100,6 +113,18 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Ubah Tipe Transaksi (Pengeluaran / Pemasukan)
+  const handleTypeChange = (newType) => {
+    setType(newType);
+    setIsCustomCategory(false);
+    setCustomCategory('');
+    if (newType === 'income') {
+      setCategory(incomeCategories[0] || 'Gaji');
+    } else {
+      setCategory(expenseCategories[0] || 'Makanan');
+    }
+  };
+
   // Modal Action Handlers
   const openAddModal = () => {
     setEditingId(null);
@@ -107,7 +132,7 @@ export default function App() {
     setTitle('');
     setAmount('');
     setUser('Papa');
-    setCategory('Makanan');
+    setCategory(DEFAULT_EXPENSE_CATEGORIES[0]);
     setIsCustomCategory(false);
     setCustomCategory('');
     setDate(new Date().toISOString().split('T')[0]);
@@ -121,7 +146,8 @@ export default function App() {
     setAmount(t.amount.toString());
     setUser(t.user);
     
-    if (DEFAULT_CATEGORIES.includes(t.category)) {
+    const activeList = t.type === 'income' ? DEFAULT_INCOME_CATEGORIES : DEFAULT_EXPENSE_CATEGORIES;
+    if (activeList.includes(t.category)) {
       setCategory(t.category);
       setIsCustomCategory(false);
       setCustomCategory('');
@@ -135,7 +161,7 @@ export default function App() {
     setShowModal(true);
   };
 
-  // Simpan Transaksi (Tambah / Edit)
+  // Simpan Transaksi
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!title || !amount) return;
@@ -181,7 +207,7 @@ export default function App() {
     }
   };
 
-  // Export Data ke Excel / CSV
+  // Export Data ke CSV
   const handleExportCSV = () => {
     if (filteredTransactions.length === 0) {
       alert("Tidak ada data transaksi untuk diunduh.");
@@ -215,7 +241,6 @@ export default function App() {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(num);
   };
 
-  // Computations
   const todayStr = new Date().toISOString().split('T')[0];
 
   const filteredTransactions = useMemo(() => {
@@ -230,7 +255,7 @@ export default function App() {
     });
   }, [transactions, searchTerm, filterUser, filterCategory, filterMonth]);
 
-  // Calculations for Summary
+  // Kalkulasi Ringkasan
   const todayTransactions = transactions.filter(t => t.date === todayStr);
   const todayIncome = todayTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
   const todayExpense = todayTransactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
@@ -253,6 +278,10 @@ export default function App() {
     });
     return Object.entries(map).sort((a, b) => b[1] - a[1]);
   }, [monthTransactions]);
+
+  const allUniqueCategories = useMemo(() => {
+    return Array.from(new Set([...expenseCategories, ...incomeCategories]));
+  }, [expenseCategories, incomeCategories]);
 
   return (
     <div className="min-h-screen bg-slate-100 pb-28 text-slate-800 font-sans max-w-md mx-auto relative shadow-2xl border-x">
@@ -305,7 +334,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* Main Content Area Based on Active Tab */}
+      {/* Main Content Area */}
       {activeTab === 'beranda' && (
         <div className="p-4 space-y-4">
           {/* Breakdown Papa vs Mama */}
@@ -427,7 +456,6 @@ export default function App() {
       {/* Tab Riwayat & Pencarian */}
       {activeTab === 'riwayat' && (
         <div className="p-4 space-y-3">
-          {/* Search Bar */}
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input 
@@ -439,7 +467,6 @@ export default function App() {
             />
           </div>
 
-          {/* Filter Bar */}
           <div className="bg-white p-3 rounded-2xl border shadow-sm space-y-2">
             <div className="flex items-center gap-1 text-xs font-bold text-slate-500">
               <Filter size={14} /> Filter Data
@@ -461,7 +488,7 @@ export default function App() {
                 className="p-1.5 bg-slate-50 border rounded-xl font-medium truncate"
               >
                 <option value="Semua">Semua Kategori</option>
-                {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                {allUniqueCategories.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
 
               <input 
@@ -480,7 +507,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* Transaksi Filtered */}
           <div className="space-y-2 pt-1">
             {filteredTransactions.length === 0 ? (
               <p className="text-center text-xs text-slate-400 py-8">Transaksi tidak ditemukan.</p>
@@ -536,7 +562,6 @@ export default function App() {
           <PieChart size={20} /> Statistik
         </button>
 
-        {/* Floating Add Button */}
         <button 
           onClick={openAddModal}
           className="bg-teal-600 hover:bg-teal-700 text-white p-3.5 rounded-full shadow-lg transition active:scale-95 -mt-6 border-4 border-slate-100"
@@ -570,14 +595,14 @@ export default function App() {
               <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl text-xs font-semibold">
                 <button
                   type="button"
-                  onClick={() => setType('expense')}
+                  onClick={() => handleTypeChange('expense')}
                   className={`py-2 rounded-lg transition ${type === 'expense' ? 'bg-rose-500 text-white shadow' : 'text-slate-500'}`}
                 >
                   Pengeluaran
                 </button>
                 <button
                   type="button"
-                  onClick={() => setType('income')}
+                  onClick={() => handleTypeChange('income')}
                   className={`py-2 rounded-lg transition ${type === 'income' ? 'bg-emerald-500 text-white shadow' : 'text-slate-500'}`}
                 >
                   Pemasukan
@@ -612,7 +637,9 @@ export default function App() {
               {/* Select & Custom Kategori */}
               <div>
                 <div className="flex justify-between items-center mb-1">
-                  <label className="text-[11px] font-bold text-slate-500 uppercase">Kategori</label>
+                  <label className="text-[11px] font-bold text-slate-500 uppercase">
+                    Kategori {type === 'income' ? 'Pemasukan' : 'Pengeluaran'}
+                  </label>
                   <button 
                     type="button"
                     onClick={() => setIsCustomCategory(!isCustomCategory)}
@@ -625,7 +652,7 @@ export default function App() {
                 {isCustomCategory ? (
                   <input 
                     type="text" 
-                    placeholder="Masukkan nama kategori baru"
+                    placeholder={`Nama kategori ${type === 'income' ? 'pemasukan' : 'pengeluaran'} baru`}
                     value={customCategory}
                     onChange={(e) => setCustomCategory(e.target.value)}
                     className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
@@ -637,7 +664,7 @@ export default function App() {
                     onChange={(e) => setCategory(e.target.value)}
                     className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
                   >
-                    {categories.map((c) => (
+                    {(type === 'income' ? incomeCategories : expenseCategories).map((c) => (
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </select>
@@ -648,7 +675,7 @@ export default function App() {
                 <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Keterangan</label>
                 <input 
                   type="text" 
-                  placeholder="Misal: Beli Sayur, Bensin"
+                  placeholder={type === 'income' ? "Misal: Gaji Bulan Ini, Proyek Freelance" : "Misal: Beli Sayur, Bensin Mobil"}
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
