@@ -34,7 +34,9 @@ import {
   Target,
   AlertTriangle,
   CheckCircle2,
-  PiggyBank
+  PiggyBank,
+  BarChart3,
+  Sliders
 } from 'lucide-react';
 
 // --- FIREBASE CONFIGURATION ---
@@ -56,13 +58,13 @@ const DEFAULT_INCOME_CATEGORIES = ['Gaji', 'Bonus', 'Freelance', 'Investasi', 'H
 
 export default function App() {
   const [transactions, setTransactions] = useState([]);
-  const [monthlyBudget, setMonthlyBudget] = useState(0);
+  const [categoryBudgets, setCategoryBudgets] = useState({});
   const [loading, setLoading] = useState(true);
   
   // Navigation & Modal States
-  const [activeTab, setActiveTab] = useState('beranda'); // 'beranda', 'anggaran', 'riwayat'
+  const [activeTab, setActiveTab] = useState('beranda'); // 'beranda', 'anggaran', 'statistik', 'riwayat'
   const [showModal, setShowModal] = useState(false);
-  const [showBudgetModal, setShowBudgetModal] = useState(false);
+  const [showCategoryBudgetModal, setShowCategoryBudgetModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
 
   // Form States
@@ -75,8 +77,8 @@ export default function App() {
   const [isCustomCategory, setIsCustomCategory] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // Budget Input State
-  const [inputBudget, setInputBudget] = useState('');
+  // Temp State untuk Modal Form Edit Budget Kategori
+  const [tempCategoryBudgets, setTempCategoryBudgets] = useState({});
 
   // Calculator State
   const [showCalculator, setShowCalculator] = useState(false);
@@ -92,7 +94,7 @@ export default function App() {
   const [filterCategory, setFilterCategory] = useState('Semua');
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
 
-  // Realtime Sync Firestore - Transaksi & Budget
+  // Realtime Sync Firestore
   useEffect(() => {
     // 1. Sync Transaksi
     const q = query(collection(db, "transactions"), orderBy("createdAt", "desc"));
@@ -125,43 +127,40 @@ export default function App() {
       setLoading(false);
     });
 
-    // 2. Sync Anggaran Bulanan
-    const unsubscribeBudget = onSnapshot(doc(db, "settings", "monthlyBudget"), (docSnap) => {
+    // 2. Sync Anggaran Per Kategori
+    const unsubscribeCategoryBudgets = onSnapshot(doc(db, "settings", "categoryBudgets"), (docSnap) => {
       if (docSnap.exists()) {
-        const bVal = docSnap.data().amount || 0;
-        setMonthlyBudget(bVal);
-        setInputBudget(bVal.toString());
+        const data = docSnap.data() || {};
+        setCategoryBudgets(data);
       } else {
-        setMonthlyBudget(0);
-        setInputBudget('');
+        setCategoryBudgets({});
       }
     });
 
     return () => {
       unsubscribeTransactions();
-      unsubscribeBudget();
+      unsubscribeCategoryBudgets();
     };
   }, []);
 
-  // Simpan Target Anggaran
-  const handleSaveBudget = async (e) => {
-    e.preventDefault();
-    const val = Number(inputBudget);
-    if (isNaN(val) || val < 0) return;
+  // Buka Modal Edit Anggaran Kategori
+  const openCategoryBudgetModal = () => {
+    setTempCategoryBudgets({ ...categoryBudgets });
+    setShowCategoryBudgetModal(true);
+  };
 
+  // Simpan Target Anggaran Kategori ke Firebase
+  const handleSaveCategoryBudgets = async (e) => {
+    e.preventDefault();
     try {
-      await setDoc(doc(db, "settings", "monthlyBudget"), {
-        amount: val,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-      setShowBudgetModal(false);
+      await setDoc(doc(db, "settings", "categoryBudgets"), tempCategoryBudgets, { merge: true });
+      setShowCategoryBudgetModal(false);
     } catch (error) {
-      console.error("Error setting budget:", error);
-      alert("Gagal menyimpan anggaran.");
+      console.error("Error setting category budgets:", error);
+      alert("Gagal menyimpan anggaran kategori.");
     }
   };
 
-  // Ubah Tipe Transaksi (Pengeluaran / Pemasukan)
   const handleTypeChange = (newType) => {
     setType(newType);
     setIsCustomCategory(false);
@@ -173,7 +172,6 @@ export default function App() {
     }
   };
 
-  // Logic Tombol Kalkulator
   const handleCalcButton = (btn) => {
     if (btn === 'C') {
       setCalcExpr('');
@@ -199,7 +197,6 @@ export default function App() {
     }
   };
 
-  // Modal Action Handlers
   const openAddModal = () => {
     setEditingId(null);
     setType('expense');
@@ -239,7 +236,6 @@ export default function App() {
     setShowModal(true);
   };
 
-  // Simpan Transaksi
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!title || !amount) return;
@@ -274,7 +270,6 @@ export default function App() {
     }
   };
 
-  // Hapus Transaksi
   const handleDelete = async (id) => {
     if (window.confirm("Hapus catatan transaksi ini?")) {
       try {
@@ -285,7 +280,6 @@ export default function App() {
     }
   };
 
-  // Export Data ke CSV
   const handleExportCSV = () => {
     if (filteredTransactions.length === 0) {
       alert("Tidak ada data transaksi untuk diunduh.");
@@ -314,7 +308,6 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  // Format Angka Rupiah
   const formatRupiah = (num) => {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(num);
   };
@@ -333,7 +326,6 @@ export default function App() {
     });
   }, [transactions, searchTerm, filterUser, filterCategory, filterMonth]);
 
-  // Kelompokkan Transaksi per Tanggal untuk Beranda
   const groupedTransactions = useMemo(() => {
     const groups = {};
     transactions.forEach(t => {
@@ -359,7 +351,6 @@ export default function App() {
       });
   }, [transactions]);
 
-  // Kalkulasi Ringkasan & Budgeting
   const todayTransactions = transactions.filter(t => t.date === todayStr);
   const todayIncome = todayTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
   const todayExpense = todayTransactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
@@ -374,29 +365,42 @@ export default function App() {
   const papaPercent = monthExpense > 0 ? Math.round((papaMonthExpense / monthExpense) * 100) : 0;
   const mamaPercent = monthExpense > 0 ? Math.round((mamaMonthExpense / monthExpense) * 100) : 0;
 
-  // Budget Calculations
-  const budgetRemaining = monthlyBudget - monthExpense;
-  const budgetUsagePercent = monthlyBudget > 0 ? Math.min(Math.round((monthExpense / monthlyBudget) * 100), 100) : 0;
-  const isOverBudget = monthlyBudget > 0 && monthExpense > monthlyBudget;
-
-  // Group Expenses by Category
-  const categoryExpenses = useMemo(() => {
+  // Group Expenses & Incomes by Category
+  const categoryExpensesMap = useMemo(() => {
     const map = {};
     monthTransactions.filter(t => t.type === 'expense').forEach(t => {
+      map[t.category] = (map[t.category] || 0) + t.amount;
+    });
+    return map;
+  }, [monthTransactions]);
+
+  const categoryExpenses = useMemo(() => {
+    return Object.entries(categoryExpensesMap).sort((a, b) => b[1] - a[1]);
+  }, [categoryExpensesMap]);
+
+  const categoryIncomes = useMemo(() => {
+    const map = {};
+    monthTransactions.filter(t => t.type === 'income').forEach(t => {
       map[t.category] = (map[t.category] || 0) + t.amount;
     });
     return Object.entries(map).sort((a, b) => b[1] - a[1]);
   }, [monthTransactions]);
 
+  // Total Budget dari Penjumlahan Seluruh Anggaran Kategori
+  const totalCategoryBudget = useMemo(() => {
+    return Object.values(categoryBudgets).reduce((sum, val) => sum + (Number(val) || 0), 0);
+  }, [categoryBudgets]);
+
+  const budgetRemaining = totalCategoryBudget - monthExpense;
+  const isOverBudget = totalCategoryBudget > 0 && monthExpense > totalCategoryBudget;
+
   const allUniqueCategories = useMemo(() => {
     return Array.from(new Set([...expenseCategories, ...incomeCategories]));
   }, [expenseCategories, incomeCategories]);
 
-  // Kalkulasi Periode Minggu, Bulan, dan Tahun
   const periodTotals = useMemo(() => {
     const now = new Date();
     
-    // Rentang Minggu Ini (Senin sampai Minggu)
     const currentDay = now.getDay();
     const diffToMon = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1);
     const monday = new Date(now.setDate(diffToMon));
@@ -490,14 +494,14 @@ export default function App() {
       {activeTab === 'beranda' && (
         <div className="p-4 space-y-4">
           {/* Status Singkat Anggaran di Beranda */}
-          {monthlyBudget > 0 && (
+          {totalCategoryBudget > 0 && (
             <div className="bg-white p-3.5 rounded-2xl border shadow-sm flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className={`p-2 rounded-xl ${isOverBudget ? 'bg-rose-100 text-rose-600' : 'bg-teal-100 text-teal-600'}`}>
                   <Target size={18} />
                 </div>
                 <div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase">Sisa Anggaran Bulan Ini</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase">Sisa Total Anggaran</p>
                   <p className={`text-xs font-bold ${isOverBudget ? 'text-rose-600' : 'text-slate-800'}`}>
                     {isOverBudget ? `Overbudget ${formatRupiah(Math.abs(budgetRemaining))}` : formatRupiah(budgetRemaining)}
                   </p>
@@ -606,119 +610,148 @@ export default function App() {
         </div>
       )}
 
-      {/* Tab Anggaran (Budgeting Dashboard) */}
+      {/* Tab Anggaran Per Kategori */}
       {activeTab === 'anggaran' && (
         <div className="p-4 space-y-4">
-          {/* Card Target & Sisa Anggaran */}
+          {/* Header Card Summary Total Anggaran */}
           <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
             <div className="flex justify-between items-center">
               <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                <Target size={14} /> Batas Anggaran Bulanan
+                <Target size={14} /> Ringkasan Anggaran Bulanan
               </h3>
               <button 
-                onClick={() => setShowBudgetModal(true)}
-                className="text-xs text-teal-600 font-bold hover:underline"
+                onClick={openCategoryBudgetModal}
+                className="text-xs bg-teal-50 text-teal-700 hover:bg-teal-100 font-bold px-2.5 py-1 rounded-xl transition flex items-center gap-1"
               >
-                {monthlyBudget > 0 ? 'Ubah Target' : '+ Atur Anggaran'}
+                <Sliders size={13} /> Atur Anggaran Kategori
               </button>
             </div>
 
-            {monthlyBudget === 0 ? (
-              <div className="text-center py-6 border border-dashed rounded-2xl bg-slate-50 p-4 space-y-2">
-                <PiggyBank size={32} className="mx-auto text-slate-400" />
-                <p className="text-xs font-semibold text-slate-600">Belum ada batas anggaran yang diatur.</p>
-                <button 
-                  onClick={() => setShowBudgetModal(true)}
-                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition shadow"
-                >
-                  Atur Target Anggaran Sekarang
-                </button>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-slate-50 p-3 rounded-xl border">
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">Total Anggaran Pagu</span>
+                <span className="text-sm font-bold text-slate-800">{formatRupiah(totalCategoryBudget)}</span>
               </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="bg-slate-50 p-3 rounded-xl border">
-                    <span className="text-[10px] text-slate-400 uppercase font-bold block">Target Pagu</span>
-                    <span className="text-sm font-bold text-slate-800">{formatRupiah(monthlyBudget)}</span>
-                  </div>
-                  <div className="bg-slate-50 p-3 rounded-xl border">
-                    <span className="text-[10px] text-slate-400 uppercase font-bold block">Terpakai</span>
-                    <span className="text-sm font-bold text-rose-600">{formatRupiah(monthExpense)}</span>
-                  </div>
-                </div>
-
-                {/* Progress Bar Indikator */}
-                <div>
-                  <div className="flex justify-between text-xs font-bold mb-1">
-                    <span>Penggunaan Anggaran</span>
-                    <span className={isOverBudget ? 'text-rose-600' : 'text-teal-600'}>
-                      {budgetUsagePercent}%
-                    </span>
-                  </div>
-                  <div className="w-full bg-slate-100 h-3.5 rounded-full overflow-hidden p-0.5 border">
-                    <div 
-                      className={`h-full rounded-full transition-all duration-500 ${
-                        isOverBudget 
-                          ? 'bg-rose-500' 
-                          : budgetUsagePercent > 80 
-                          ? 'bg-amber-500' 
-                          : 'bg-teal-500'
-                      }`}
-                      style={{ width: `${budgetUsagePercent}%` }}
-                    ></div>
-                  </div>
-                </div>
-
-                {/* Warning / Status Banner */}
-                <div className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
-                  isOverBudget 
-                    ? 'bg-rose-50 text-rose-700 border border-rose-200' 
-                    : budgetUsagePercent > 80 
-                    ? 'bg-amber-50 text-amber-800 border border-amber-200' 
-                    : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                }`}>
-                  {isOverBudget ? (
-                    <>
-                      <AlertTriangle size={18} className="shrink-0 text-rose-600" />
-                      <span><strong>Overbudget!</strong> Pengeluaran melebihi anggaran sebesar {formatRupiah(Math.abs(budgetRemaining))}.</span>
-                    </>
-                  ) : budgetUsagePercent > 80 ? (
-                    <>
-                      <AlertTriangle size={18} className="shrink-0 text-amber-600" />
-                      <span><strong>Waspada!</strong> Pengeluaran sudah terpakai {budgetUsagePercent}%. Sisa anggaran: {formatRupiah(budgetRemaining)}.</span>
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 size={18} className="shrink-0 text-emerald-600" />
-                      <span><strong>Aman!</strong> Sisa anggaran bulan ini: {formatRupiah(budgetRemaining)}.</span>
-                    </>
-                  )}
-                </div>
+              <div className="bg-slate-50 p-3 rounded-xl border">
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">Total Pengeluaran</span>
+                <span className="text-sm font-bold text-rose-600">{formatRupiah(monthExpense)}</span>
               </div>
-            )}
+            </div>
           </div>
 
-          {/* Penggunaan Anggaran per Kategori */}
+          {/* List Anggaran Per Kategori Pengeluaran */}
           <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-              Pemakaian per Kategori ({filterMonth})
+              Anggaran Pengeluaran per Kategori
+            </h3>
+
+            <div className="space-y-4">
+              {expenseCategories.map((cat) => {
+                const targetBudget = Number(categoryBudgets[cat]) || 0;
+                const spent = categoryExpensesMap[cat] || 0;
+                const percent = targetBudget > 0 ? Math.min(Math.round((spent / targetBudget) * 100), 100) : 0;
+                const catOver = targetBudget > 0 && spent > targetBudget;
+                const catRem = targetBudget - spent;
+
+                return (
+                  <div key={cat} className="p-3 bg-slate-50 rounded-2xl border space-y-2">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-800">{cat}</h4>
+                        <p className="text-[10px] text-slate-400 font-medium">
+                          Terpakai: <span className="font-bold text-slate-700">{formatRupiah(spent)}</span> / {formatRupiah(targetBudget)}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        {targetBudget > 0 ? (
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                            catOver ? 'bg-rose-100 text-rose-700' : percent > 80 ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
+                          }`}>
+                            {catOver ? `Over ${formatRupiah(Math.abs(catRem))}` : `Sisa ${formatRupiah(catRem)}`}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-semibold text-slate-400">Belum diatur</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Progress Bar Kategori */}
+                    <div className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          catOver ? 'bg-rose-500' : percent > 80 ? 'bg-amber-500' : 'bg-teal-500'
+                        }`}
+                        style={{ width: targetBudget > 0 ? `${percent}%` : '0%' }}
+                      ></div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab Statistik Sederhana */}
+      {activeTab === 'statistik' && (
+        <div className="p-4 space-y-4">
+          <div className="flex items-center justify-between bg-white p-3 rounded-2xl border shadow-sm">
+            <span className="text-xs font-bold text-slate-600 flex items-center gap-1">
+              <Calendar size={14} /> Pilih Bulan
+            </span>
+            <input 
+              type="month" 
+              value={filterMonth}
+              onChange={(e) => setFilterMonth(e.target.value)}
+              className="text-xs font-semibold bg-slate-100 p-1.5 rounded-lg border focus:outline-teal-500"
+            />
+          </div>
+
+          {/* Statistik Pengeluaran per Kategori */}
+          <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+              <BarChart3 size={14} /> Pengeluaran per Kategori ({filterMonth})
             </h3>
 
             {categoryExpenses.length === 0 ? (
               <p className="text-xs text-slate-400 text-center py-4">Belum ada pengeluaran di bulan ini.</p>
             ) : (
               categoryExpenses.map(([cat, total]) => {
-                const percentOfBudget = monthlyBudget > 0 ? Math.round((total / monthlyBudget) * 100) : 0;
+                const percent = Math.round((total / (monthExpense || 1)) * 100);
                 return (
                   <div key={cat} className="space-y-1">
                     <div className="flex justify-between text-xs font-medium">
                       <span className="text-slate-700">{cat}</span>
-                      <span className="font-bold text-slate-800">
-                        {formatRupiah(total)} {monthlyBudget > 0 && <span className="text-slate-400 font-normal">({percentOfBudget}% pagu)</span>}
-                      </span>
+                      <span className="font-bold text-slate-800">{formatRupiah(total)} ({percent}%)</span>
                     </div>
-                    <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                      <div className="bg-teal-500 h-full rounded-full transition-all duration-300" style={{ width: `${Math.min(percentOfBudget, 100)}%` }}></div>
+                    <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                      <div className="bg-teal-500 h-full rounded-full transition-all duration-300" style={{ width: `${percent}%` }}></div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Statistik Pemasukan per Kategori */}
+          <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+              <BarChart3 size={14} /> Pemasukan per Kategori ({filterMonth})
+            </h3>
+
+            {categoryIncomes.length === 0 ? (
+              <p className="text-xs text-slate-400 text-center py-4">Belum ada pemasukan di bulan ini.</p>
+            ) : (
+              categoryIncomes.map(([cat, total]) => {
+                const percent = Math.round((total / (monthIncome || 1)) * 100);
+                return (
+                  <div key={cat} className="space-y-1">
+                    <div className="flex justify-between text-xs font-medium">
+                      <span className="text-slate-700">{cat}</span>
+                      <span className="font-bold text-emerald-600">{formatRupiah(total)} ({percent}%)</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                      <div className="bg-emerald-500 h-full rounded-full transition-all duration-300" style={{ width: `${percent}%` }}></div>
                     </div>
                   </div>
                 );
@@ -728,10 +761,9 @@ export default function App() {
         </div>
       )}
 
-      {/* Tab Riwayat & Pencarian */}
+      {/* Tab Riwayat */}
       {activeTab === 'riwayat' && (
         <div className="p-4 space-y-3">
-          {/* Ringkasan Per Minggu, Bulan, dan Tahun */}
           <div className="bg-white p-3.5 rounded-2xl border shadow-sm space-y-2.5">
             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
               <CalendarDays size={14} /> Rekap Keuangan Periode
@@ -758,7 +790,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Search Bar */}
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input 
@@ -770,7 +801,6 @@ export default function App() {
             />
           </div>
 
-          {/* Filter Bar */}
           <div className="bg-white p-3 rounded-2xl border shadow-sm space-y-2">
             <div className="flex items-center gap-1 text-xs font-bold text-slate-500">
               <Filter size={14} /> Filter Data
@@ -811,7 +841,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* Transaksi Filtered */}
           <div className="space-y-2 pt-1">
             {filteredTransactions.length === 0 ? (
               <p className="text-center text-xs text-slate-400 py-8">Transaksi tidak ditemukan.</p>
@@ -857,61 +886,79 @@ export default function App() {
           onClick={() => setActiveTab('beranda')}
           className={`flex flex-col items-center gap-1 p-2 rounded-xl text-xs font-semibold ${activeTab === 'beranda' ? 'text-teal-600' : 'text-slate-400'}`}
         >
-          <Home size={20} /> Beranda
+          <Home size={18} /> Beranda
         </button>
 
         <button 
           onClick={() => setActiveTab('anggaran')}
           className={`flex flex-col items-center gap-1 p-2 rounded-xl text-xs font-semibold ${activeTab === 'anggaran' ? 'text-teal-600' : 'text-slate-400'}`}
         >
-          <Target size={20} /> Anggaran
+          <Target size={18} /> Anggaran
         </button>
 
         <button 
           onClick={openAddModal}
-          className="bg-teal-600 hover:bg-teal-700 text-white p-3.5 rounded-full shadow-lg transition active:scale-95 -mt-6 border-4 border-slate-100"
+          className="bg-teal-600 hover:bg-teal-700 text-white p-3 rounded-full shadow-lg transition active:scale-95 -mt-5 border-4 border-slate-100"
         >
-          <PlusCircle size={26} />
+          <PlusCircle size={24} />
+        </button>
+
+        <button 
+          onClick={() => setActiveTab('statistik')}
+          className={`flex flex-col items-center gap-1 p-2 rounded-xl text-xs font-semibold ${activeTab === 'statistik' ? 'text-teal-600' : 'text-slate-400'}`}
+        >
+          <PieChart size={18} /> Statistik
         </button>
 
         <button 
           onClick={() => setActiveTab('riwayat')}
           className={`flex flex-col items-center gap-1 p-2 rounded-xl text-xs font-semibold ${activeTab === 'riwayat' ? 'text-teal-600' : 'text-slate-400'}`}
         >
-          <List size={20} /> Riwayat
+          <List size={18} /> Riwayat
         </button>
       </div>
 
-      {/* Modal Atur Anggaran */}
-      {showBudgetModal && (
+      {/* Modal Atur Anggaran Per Kategori */}
+      {showCategoryBudgetModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-3xl p-5 shadow-2xl animate-in fade-in duration-200 max-h-[85vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-base font-bold text-slate-800">Target Anggaran Bulanan</h3>
-              <button onClick={() => setShowBudgetModal(false)} className="text-slate-400 hover:text-slate-600">
+              <h3 className="text-base font-bold text-slate-800">Atur Anggaran Kategori</h3>
+              <button onClick={() => setShowCategoryBudgetModal(false)} className="text-slate-400 hover:text-slate-600">
                 <X size={20} />
               </button>
             </div>
 
-            <form onSubmit={handleSaveBudget} className="space-y-4">
-              <div>
-                <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">
-                  Batas Maksimal Pengeluaran (Rp)
-                </label>
-                <input 
-                  type="number" 
-                  placeholder="Contoh: 5000000"
-                  value={inputBudget}
-                  onChange={(e) => setInputBudget(e.target.value)}
-                  className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
-                  required
-                />
+            <form onSubmit={handleSaveCategoryBudgets} className="space-y-3.5">
+              <p className="text-xs text-slate-500">Masukkan target anggaran maksimal bulanan untuk masing-masing kategori pengeluaran:</p>
+
+              <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
+                {expenseCategories.map((cat) => (
+                  <div key={cat} className="flex items-center justify-between gap-2">
+                    <label className="text-xs font-bold text-slate-700 w-1/3 truncate">{cat}</label>
+                    <div className="w-2/3">
+                      <input 
+                        type="number" 
+                        placeholder="0 (Tidak dibatasi)"
+                        value={tempCategoryBudgets[cat] || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setTempCategoryBudgets(prev => ({
+                            ...prev,
+                            [cat]: val
+                          }));
+                        }}
+                        className="w-full p-2 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex gap-2 pt-2">
                 <button 
                   type="button" 
-                  onClick={() => setShowBudgetModal(false)}
+                  onClick={() => setShowCategoryBudgetModal(false)}
                   className="w-1/2 py-2.5 border rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"
                 >
                   Batal
@@ -920,7 +967,7 @@ export default function App() {
                   type="submit"
                   className="w-1/2 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs shadow-md transition"
                 >
-                  Simpan Target
+                  Simpan Anggaran
                 </button>
               </div>
             </form>
@@ -942,7 +989,6 @@ export default function App() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-3.5">
-              {/* Type Switcher */}
               <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl text-xs font-semibold">
                 <button
                   type="button"
@@ -960,7 +1006,6 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Input Tanggal & Pencatatan */}
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Tanggal</label>
@@ -985,7 +1030,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Select & Custom Kategori */}
               <div>
                 <div className="flex justify-between items-center mb-1">
                   <label className="text-[11px] font-bold text-slate-500 uppercase">
@@ -1034,7 +1078,6 @@ export default function App() {
                 />
               </div>
 
-              {/* Jumlah (Rp) dengan Fitur Kalkulator */}
               <div>
                 <div className="flex justify-between items-center mb-1">
                   <label className="text-[11px] font-bold text-slate-500 uppercase">Jumlah (Rp)</label>
