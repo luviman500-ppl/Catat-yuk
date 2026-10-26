@@ -9,6 +9,7 @@ import {
   deleteDoc, 
   doc, 
   setDoc,
+  deleteField,
   query, 
   orderBy, 
   serverTimestamp 
@@ -35,8 +36,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   PiggyBank,
-  BarChart3,
-  Sliders
+  BarChart3
 } from 'lucide-react';
 
 // --- FIREBASE CONFIGURATION ---
@@ -64,10 +64,10 @@ export default function App() {
   // Navigation & Modal States
   const [activeTab, setActiveTab] = useState('beranda'); // 'beranda', 'anggaran', 'statistik', 'riwayat'
   const [showModal, setShowModal] = useState(false);
-  const [showCategoryBudgetModal, setShowCategoryBudgetModal] = useState(false);
+  const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
 
-  // Form States
+  // Form States Transaksi
   const [type, setType] = useState('expense');
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
@@ -77,8 +77,12 @@ export default function App() {
   const [isCustomCategory, setIsCustomCategory] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // Temp State untuk Modal Form Edit Budget Kategori
-  const [tempCategoryBudgets, setTempCategoryBudgets] = useState({});
+  // Form States Modal Anggaran (Tambah/Edit)
+  const [budgetCatName, setBudgetCatName] = useState('');
+  const [isNewBudgetCatCustom, setIsNewBudgetCatCustom] = useState(false);
+  const [customBudgetCatName, setCustomBudgetCatName] = useState('');
+  const [budgetAmount, setBudgetAmount] = useState('');
+  const [isEditingBudget, setIsEditingBudget] = useState(false);
 
   // Calculator State
   const [showCalculator, setShowCalculator] = useState(false);
@@ -130,8 +134,7 @@ export default function App() {
     // 2. Sync Anggaran Per Kategori
     const unsubscribeCategoryBudgets = onSnapshot(doc(db, "settings", "categoryBudgets"), (docSnap) => {
       if (docSnap.exists()) {
-        const data = docSnap.data() || {};
-        setCategoryBudgets(data);
+        setCategoryBudgets(docSnap.data() || {});
       } else {
         setCategoryBudgets({});
       }
@@ -143,21 +146,61 @@ export default function App() {
     };
   }, []);
 
-  // Buka Modal Edit Anggaran Kategori
-  const openCategoryBudgetModal = () => {
-    setTempCategoryBudgets({ ...categoryBudgets });
-    setShowCategoryBudgetModal(true);
+  // Action: Buka Modal Tambah Anggaran
+  const openAddBudgetModal = () => {
+    setIsEditingBudget(false);
+    setBudgetCatName(expenseCategories[0] || 'Makanan');
+    setIsNewBudgetCatCustom(false);
+    setCustomBudgetCatName('');
+    setBudgetAmount('');
+    setShowBudgetModal(true);
   };
 
-  // Simpan Target Anggaran Kategori ke Firebase
-  const handleSaveCategoryBudgets = async (e) => {
+  // Action: Buka Modal Edit Anggaran
+  const openEditBudgetModal = (catName, currentAmount) => {
+    setIsEditingBudget(true);
+    setBudgetCatName(catName);
+    setIsNewBudgetCatCustom(false);
+    setCustomBudgetCatName('');
+    setBudgetAmount(currentAmount.toString());
+    setShowBudgetModal(true);
+  };
+
+  // Action: Simpan Anggaran (Tambah / Edit)
+  const handleSaveBudget = async (e) => {
     e.preventDefault();
+    const finalCatName = isNewBudgetCatCustom && customBudgetCatName.trim()
+      ? customBudgetCatName.trim()
+      : budgetCatName;
+
+    const val = Number(budgetAmount);
+    if (!finalCatName || isNaN(val) || val <= 0) {
+      alert("Masukkan nama kategori dan nominal anggaran yang valid.");
+      return;
+    }
+
     try {
-      await setDoc(doc(db, "settings", "categoryBudgets"), tempCategoryBudgets, { merge: true });
-      setShowCategoryBudgetModal(false);
+      await setDoc(doc(db, "settings", "categoryBudgets"), {
+        [finalCatName]: val
+      }, { merge: true });
+      setShowBudgetModal(false);
     } catch (error) {
-      console.error("Error setting category budgets:", error);
-      alert("Gagal menyimpan anggaran kategori.");
+      console.error("Error saving budget:", error);
+      alert("Gagal menyimpan anggaran.");
+    }
+  };
+
+  // Action: Hapus Anggaran Kategori
+  const handleDeleteBudget = async (catName) => {
+    if (window.confirm(`Hapus anggaran untuk kategori "${catName}"?`)) {
+      try {
+        await updateDoc(doc(db, "settings", "categoryBudgets"), {
+          [catName]: deleteField()
+        });
+      } catch (error) {
+        console.error("Error deleting budget:", error);
+        alert("Gagal menghapus anggaran.");
+      }
     }
   };
 
@@ -386,13 +429,17 @@ export default function App() {
     return Object.entries(map).sort((a, b) => b[1] - a[1]);
   }, [monthTransactions]);
 
-  // Total Budget dari Penjumlahan Seluruh Anggaran Kategori
+  // Total Budget dari Seluruh Anggaran Kategori
   const totalCategoryBudget = useMemo(() => {
     return Object.values(categoryBudgets).reduce((sum, val) => sum + (Number(val) || 0), 0);
   }, [categoryBudgets]);
 
   const budgetRemaining = totalCategoryBudget - monthExpense;
   const isOverBudget = totalCategoryBudget > 0 && monthExpense > totalCategoryBudget;
+
+  const budgetCategoryList = useMemo(() => {
+    return Object.entries(categoryBudgets);
+  }, [categoryBudgets]);
 
   const allUniqueCategories = useMemo(() => {
     return Array.from(new Set([...expenseCategories, ...incomeCategories]));
@@ -610,84 +657,110 @@ export default function App() {
         </div>
       )}
 
-      {/* Tab Anggaran Per Kategori */}
+      {/* Tab Anggaran (Tambah, Edit, Hapus Anggaran Per Kategori) */}
       {activeTab === 'anggaran' && (
         <div className="p-4 space-y-4">
-          {/* Header Card Summary Total Anggaran */}
+          {/* Header Summary Total Anggaran */}
           <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
             <div className="flex justify-between items-center">
               <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                <Target size={14} /> Ringkasan Anggaran Bulanan
+                <Target size={14} /> Total Anggaran Bulanan
               </h3>
               <button 
-                onClick={openCategoryBudgetModal}
-                className="text-xs bg-teal-50 text-teal-700 hover:bg-teal-100 font-bold px-2.5 py-1 rounded-xl transition flex items-center gap-1"
+                onClick={openAddBudgetModal}
+                className="text-xs bg-teal-600 text-white hover:bg-teal-700 font-bold px-3 py-1.5 rounded-xl transition flex items-center gap-1 shadow-sm"
               >
-                <Sliders size={13} /> Atur Anggaran Kategori
+                <Plus size={14} /> Tambah Anggaran
               </button>
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="bg-slate-50 p-3 rounded-xl border">
-                <span className="text-[10px] text-slate-400 uppercase font-bold block">Total Anggaran Pagu</span>
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">Total Target Pagu</span>
                 <span className="text-sm font-bold text-slate-800">{formatRupiah(totalCategoryBudget)}</span>
               </div>
               <div className="bg-slate-50 p-3 rounded-xl border">
-                <span className="text-[10px] text-slate-400 uppercase font-bold block">Total Pengeluaran</span>
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">Total Terpakai</span>
                 <span className="text-sm font-bold text-rose-600">{formatRupiah(monthExpense)}</span>
               </div>
             </div>
           </div>
 
-          {/* List Anggaran Per Kategori Pengeluaran */}
+          {/* List Anggaran Kategori */}
           <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-              Anggaran Pengeluaran per Kategori
-            </h3>
+            <div className="flex justify-between items-center">
+              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                Daftar Anggaran Kategori
+              </h3>
+              <span className="text-[11px] text-slate-400">{budgetCategoryList.length} Kategori Diatur</span>
+            </div>
 
-            <div className="space-y-4">
-              {expenseCategories.map((cat) => {
-                const targetBudget = Number(categoryBudgets[cat]) || 0;
-                const spent = categoryExpensesMap[cat] || 0;
-                const percent = targetBudget > 0 ? Math.min(Math.round((spent / targetBudget) * 100), 100) : 0;
-                const catOver = targetBudget > 0 && spent > targetBudget;
-                const catRem = targetBudget - spent;
+            {budgetCategoryList.length === 0 ? (
+              <div className="text-center py-8 border border-dashed rounded-2xl bg-slate-50 p-4 space-y-2">
+                <PiggyBank size={32} className="mx-auto text-slate-400" />
+                <p className="text-xs font-semibold text-slate-600">Belum ada anggaran kategori yang diatur.</p>
+                <button 
+                  onClick={openAddBudgetModal}
+                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition shadow"
+                >
+                  + Tambah Anggaran Sekarang
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {budgetCategoryList.map(([cat, targetBudget]) => {
+                  const spent = categoryExpensesMap[cat] || 0;
+                  const targetNum = Number(targetBudget) || 0;
+                  const percent = targetNum > 0 ? Math.min(Math.round((spent / targetNum) * 100), 100) : 0;
+                  const catOver = targetNum > 0 && spent > targetNum;
+                  const catRem = targetNum - spent;
 
-                return (
-                  <div key={cat} className="p-3 bg-slate-50 rounded-2xl border space-y-2">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <h4 className="text-xs font-bold text-slate-800">{cat}</h4>
-                        <p className="text-[10px] text-slate-400 font-medium">
-                          Terpakai: <span className="font-bold text-slate-700">{formatRupiah(spent)}</span> / {formatRupiah(targetBudget)}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        {targetBudget > 0 ? (
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                  return (
+                    <div key={cat} className="p-3.5 bg-slate-50 rounded-2xl border space-y-2 hover:shadow-sm transition">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-800">{cat}</h4>
+                          <p className="text-[10px] text-slate-400 font-medium mt-0.5">
+                            Terpakai: <span className="font-bold text-slate-700">{formatRupiah(spent)}</span> dari {formatRupiah(targetNum)}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md mr-1 ${
                             catOver ? 'bg-rose-100 text-rose-700' : percent > 80 ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
                           }`}>
                             {catOver ? `Over ${formatRupiah(Math.abs(catRem))}` : `Sisa ${formatRupiah(catRem)}`}
                           </span>
-                        ) : (
-                          <span className="text-[10px] font-semibold text-slate-400">Belum diatur</span>
-                        )}
+                          <button 
+                            onClick={() => openEditBudgetModal(cat, targetNum)} 
+                            className="text-slate-400 hover:text-teal-600 p-1"
+                            title="Edit Anggaran"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteBudget(cat)} 
+                            className="text-slate-400 hover:text-rose-500 p-1"
+                            title="Hapus Anggaran"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Progress Bar Kategori */}
+                      <div className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full rounded-full transition-all duration-300 ${
+                            catOver ? 'bg-rose-500' : percent > 80 ? 'bg-amber-500' : 'bg-teal-500'
+                          }`}
+                          style={{ width: `${percent}%` }}
+                        ></div>
                       </div>
                     </div>
-
-                    {/* Progress Bar Kategori */}
-                    <div className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full rounded-full transition-all duration-300 ${
-                          catOver ? 'bg-rose-500' : percent > 80 ? 'bg-amber-500' : 'bg-teal-500'
-                        }`}
-                        style={{ width: targetBudget > 0 ? `${percent}%` : '0%' }}
-                      ></div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -918,47 +991,82 @@ export default function App() {
         </button>
       </div>
 
-      {/* Modal Atur Anggaran Per Kategori */}
-      {showCategoryBudgetModal && (
+      {/* Modal Tambah / Edit Anggaran Kategori */}
+      {showBudgetModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white w-full max-w-md rounded-3xl p-5 shadow-2xl animate-in fade-in duration-200 max-h-[85vh] overflow-y-auto">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-in fade-in duration-200">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-base font-bold text-slate-800">Atur Anggaran Kategori</h3>
-              <button onClick={() => setShowCategoryBudgetModal(false)} className="text-slate-400 hover:text-slate-600">
+              <h3 className="text-base font-bold text-slate-800">
+                {isEditingBudget ? 'Edit Anggaran Kategori' : 'Tambah Anggaran Kategori'}
+              </h3>
+              <button onClick={() => setShowBudgetModal(false)} className="text-slate-400 hover:text-slate-600">
                 <X size={20} />
               </button>
             </div>
 
-            <form onSubmit={handleSaveCategoryBudgets} className="space-y-3.5">
-              <p className="text-xs text-slate-500">Masukkan target anggaran maksimal bulanan untuk masing-masing kategori pengeluaran:</p>
+            <form onSubmit={handleSaveBudget} className="space-y-3.5">
+              {/* Kategori Selector */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-[11px] font-bold text-slate-500 uppercase">Kategori Pengeluaran</label>
+                  {!isEditingBudget && (
+                    <button 
+                      type="button"
+                      onClick={() => setIsNewBudgetCatCustom(!isNewBudgetCatCustom)}
+                      className="text-[11px] text-teal-600 font-semibold hover:underline flex items-center gap-0.5"
+                    >
+                      <Plus size={12} /> {isNewBudgetCatCustom ? 'Pilih Kategori Bawaan' : 'Buat Kategori Baru'}
+                    </button>
+                  )}
+                </div>
 
-              <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
-                {expenseCategories.map((cat) => (
-                  <div key={cat} className="flex items-center justify-between gap-2">
-                    <label className="text-xs font-bold text-slate-700 w-1/3 truncate">{cat}</label>
-                    <div className="w-2/3">
-                      <input 
-                        type="number" 
-                        placeholder="0 (Tidak dibatasi)"
-                        value={tempCategoryBudgets[cat] || ''}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setTempCategoryBudgets(prev => ({
-                            ...prev,
-                            [cat]: val
-                          }));
-                        }}
-                        className="w-full p-2 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
-                      />
-                    </div>
-                  </div>
-                ))}
+                {isEditingBudget ? (
+                  <input 
+                    type="text" 
+                    value={budgetCatName} 
+                    disabled 
+                    className="w-full p-2.5 text-xs bg-slate-100 border rounded-xl font-bold text-slate-600"
+                  />
+                ) : isNewBudgetCatCustom ? (
+                  <input 
+                    type="text" 
+                    placeholder="Nama kategori pengeluaran baru"
+                    value={customBudgetCatName}
+                    onChange={(e) => setCustomBudgetCatName(e.target.value)}
+                    className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
+                    required
+                  />
+                ) : (
+                  <select 
+                    value={budgetCatName} 
+                    onChange={(e) => setBudgetCatName(e.target.value)}
+                    className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
+                  >
+                    {expenseCategories.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">
+                  Batas Anggaran Bulanan (Rp)
+                </label>
+                <input 
+                  type="number" 
+                  placeholder="Contoh: 1500000"
+                  value={budgetAmount}
+                  onChange={(e) => setBudgetAmount(e.target.value)}
+                  className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
+                  required
+                />
               </div>
 
               <div className="flex gap-2 pt-2">
                 <button 
                   type="button" 
-                  onClick={() => setShowCategoryBudgetModal(false)}
+                  onClick={() => setShowBudgetModal(false)}
                   className="w-1/2 py-2.5 border rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"
                 >
                   Batal
@@ -967,7 +1075,7 @@ export default function App() {
                   type="submit"
                   className="w-1/2 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs shadow-md transition"
                 >
-                  Simpan Anggaran
+                  {isEditingBudget ? 'Simpan Perubahan' : 'Tambah Anggaran'}
                 </button>
               </div>
             </form>
