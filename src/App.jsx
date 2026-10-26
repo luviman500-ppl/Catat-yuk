@@ -28,7 +28,8 @@ import {
   Download,
   Filter,
   BarChart3,
-  Plus
+  Plus,
+  Calculator
 } from 'lucide-react';
 
 // --- FIREBASE CONFIGURATION ---
@@ -66,6 +67,10 @@ export default function App() {
   const [customCategory, setCustomCategory] = useState('');
   const [isCustomCategory, setIsCustomCategory] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // Calculator State
+  const [showCalculator, setShowCalculator] = useState(false);
+  const [calcExpr, setCalcExpr] = useState('');
 
   // Categories list states
   const [expenseCategories, setExpenseCategories] = useState(DEFAULT_EXPENSE_CATEGORIES);
@@ -124,12 +129,40 @@ export default function App() {
     }
   };
 
+  // Logic Tombol Kalkulator
+  const handleCalcButton = (btn) => {
+    if (btn === 'C') {
+      setCalcExpr('');
+      setAmount('');
+    } else if (btn === '=') {
+      try {
+        const sanitized = calcExpr.replace(/[^0-9+\-*/.]/g, '');
+        if (sanitized) {
+          const result = Function(`'use strict'; return (${sanitized})`)();
+          const finalVal = Math.round(result).toString();
+          setAmount(finalVal);
+          setCalcExpr(finalVal);
+        }
+      } catch (err) {
+        alert("Ekspresi matematika tidak valid.");
+      }
+    } else {
+      const updated = calcExpr + btn;
+      setCalcExpr(updated);
+      if (!isNaN(updated)) {
+        setAmount(updated);
+      }
+    }
+  };
+
   // Modal Action Handlers
   const openAddModal = () => {
     setEditingId(null);
     setType('expense');
     setTitle('');
     setAmount('');
+    setCalcExpr('');
+    setShowCalculator(false);
     setUser('Papa');
     setCategory(DEFAULT_EXPENSE_CATEGORIES[0]);
     setIsCustomCategory(false);
@@ -143,6 +176,8 @@ export default function App() {
     setType(t.type);
     setTitle(t.title);
     setAmount(t.amount.toString());
+    setCalcExpr(t.amount.toString());
+    setShowCalculator(false);
     setUser(t.user);
     
     const activeList = t.type === 'income' ? DEFAULT_INCOME_CATEGORIES : DEFAULT_EXPENSE_CATEGORIES;
@@ -436,12 +471,15 @@ export default function App() {
                               </div>
                             </div>
                           </div>
-                          <div className="flex items-center gap-1.5">
-                            <span className={`text-sm font-bold ${t.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                          <div className="flex items-center gap-1">
+                            <span className={`text-sm font-bold mr-1 ${t.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
                               {t.type === 'income' ? '+' : '-'}{formatRupiah(t.amount)}
                             </span>
-                            <button onClick={() => openEditModal(t)} className="text-slate-300 hover:text-teal-600 p-1">
+                            <button onClick={() => openEditModal(t)} className="text-slate-300 hover:text-teal-600 p-1" title="Edit">
                               <Edit2 size={15} />
+                            </button>
+                            <button onClick={() => handleDelete(t.id)} className="text-slate-300 hover:text-rose-500 p-1" title="Hapus">
+                              <Trash2 size={15} />
                             </button>
                           </div>
                         </div>
@@ -727,16 +765,57 @@ export default function App() {
                 />
               </div>
 
+              {/* Jumlah (Rp) dengan Fitur Kalkulator */}
               <div>
-                <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Jumlah (Rp)</label>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-[11px] font-bold text-slate-500 uppercase">Jumlah (Rp)</label>
+                  <button 
+                    type="button"
+                    onClick={() => setShowCalculator(!showCalculator)}
+                    className="text-[11px] text-teal-600 font-semibold hover:underline flex items-center gap-1"
+                  >
+                    <Calculator size={13} /> {showCalculator ? 'Tutup Kalkulator' : 'Buka Kalkulator'}
+                  </button>
+                </div>
+
                 <input 
                   type="number" 
                   placeholder="0"
                   value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
+                  onChange={(e) => {
+                    setAmount(e.target.value);
+                    setCalcExpr(e.target.value);
+                  }}
                   className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
                   required
                 />
+
+                {/* Pad Kalkulator */}
+                {showCalculator && (
+                  <div className="mt-2.5 p-2.5 bg-slate-100 rounded-2xl border text-xs shadow-inner space-y-2">
+                    <div className="bg-white p-2 rounded-xl text-right font-mono text-xs text-slate-600 border truncate min-h-[32px]">
+                      {calcExpr || '0'}
+                    </div>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {['7','8','9','/','4','5','6','*','1','2','3','-','C','0','=','+'].map((btn) => (
+                        <button
+                          key={btn}
+                          type="button"
+                          onClick={() => handleCalcButton(btn)}
+                          className={`p-2.5 rounded-xl font-bold transition active:scale-95 ${
+                            ['/','*','-','+','='].includes(btn) 
+                              ? 'bg-teal-600 text-white' 
+                              : btn === 'C' 
+                              ? 'bg-rose-500 text-white' 
+                              : 'bg-white text-slate-700 hover:bg-slate-200 border'
+                          }`}
+                        >
+                          {btn}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <button 
