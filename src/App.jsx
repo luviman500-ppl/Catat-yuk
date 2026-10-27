@@ -36,7 +36,11 @@ import {
   AlertTriangle,
   CheckCircle2,
   PiggyBank,
-  BarChart3
+  BarChart3,
+  HandCoins,
+  Trophy,
+  Check,
+  Coins
 } from 'lucide-react';
 
 // --- FIREBASE CONFIGURATION ---
@@ -52,22 +56,29 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// Kategori Bawaan Terpisah
 const DEFAULT_EXPENSE_CATEGORIES = ['Makanan', 'Transportasi', 'Tagihan', 'Belanja', 'Kesehatan', 'Pendidikan', 'Hiburan', 'Lainnya'];
 const DEFAULT_INCOME_CATEGORIES = ['Gaji', 'Bonus', 'Freelance', 'Investasi', 'Hadiah', 'Lainnya'];
 
 export default function App() {
   const [transactions, setTransactions] = useState([]);
   const [categoryBudgets, setCategoryBudgets] = useState({});
+  const [debts, setDebts] = useState([]);
+  const [goals, setGoals] = useState([]);
   const [loading, setLoading] = useState(true);
   
-  // Navigation & Modal States
-  const [activeTab, setActiveTab] = useState('beranda'); // 'beranda', 'anggaran', 'statistik', 'riwayat'
+  // Navigation States
+  const [activeTab, setActiveTab] = useState('beranda'); // 'beranda', 'anggaran', 'fitur_lain', 'statistik', 'riwayat'
+  const [subTabFitur, setSubTabFitur] = useState('utang'); // 'utang', 'goals'
+
+  // Modal States
   const [showModal, setShowModal] = useState(false);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
-  const [editingId, setEditingId] = useState(null);
+  const [showDebtModal, setShowDebtModal] = useState(false);
+  const [showGoalModal, setShowGoalModal] = useState(false);
+  const [showAddGoalFundModal, setShowAddGoalFundModal] = useState(false);
 
   // Form States Transaksi
+  const [editingId, setEditingId] = useState(null);
   const [type, setType] = useState('expense');
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
@@ -77,18 +88,37 @@ export default function App() {
   const [isCustomCategory, setIsCustomCategory] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // Form States Modal Anggaran (Tambah/Edit)
+  // Form States Modal Anggaran
   const [budgetCatName, setBudgetCatName] = useState('');
   const [isNewBudgetCatCustom, setIsNewBudgetCatCustom] = useState(false);
   const [customBudgetCatName, setCustomBudgetCatName] = useState('');
   const [budgetAmount, setBudgetAmount] = useState('');
   const [isEditingBudget, setIsEditingBudget] = useState(false);
 
+  // Form States Utang & Piutang
+  const [editingDebtId, setEditingDebtId] = useState(null);
+  const [debtType, setDebtType] = useState('utang'); // 'utang' atau 'piutang'
+  const [debtPerson, setDebtPerson] = useState('');
+  const [debtTitle, setDebtTitle] = useState('');
+  const [debtAmount, setDebtAmount] = useState('');
+  const [debtDueDate, setDebtDueDate] = useState('');
+
+  // Form States Goals / Impian
+  const [editingGoalId, setEditingGoalId] = useState(null);
+  const [goalTitle, setGoalTitle] = useState('');
+  const [goalTargetAmount, setGoalTargetAmount] = useState('');
+  const [goalCurrentAmount, setGoalCurrentAmount] = useState('');
+  const [goalTargetDate, setGoalTargetDate] = useState('');
+  
+  // Fund Addition State
+  const [selectedGoal, setSelectedGoal] = useState(null);
+  const [addFundAmount, setAddFundAmount] = useState('');
+
   // Calculator State
   const [showCalculator, setShowCalculator] = useState(false);
   const [calcExpr, setCalcExpr] = useState('');
 
-  // Categories list states
+  // Categories list
   const [expenseCategories, setExpenseCategories] = useState(DEFAULT_EXPENSE_CATEGORIES);
   const [incomeCategories, setIncomeCategories] = useState(DEFAULT_INCOME_CATEGORIES);
 
@@ -100,53 +130,187 @@ export default function App() {
 
   // Realtime Sync Firestore
   useEffect(() => {
-    // 1. Sync Transaksi
-    const q = query(collection(db, "transactions"), orderBy("createdAt", "desc"));
-    const unsubscribeTransactions = onSnapshot(q, (snapshot) => {
-      const docs = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+    // 1. Transaksi
+    const qTrans = query(collection(db, "transactions"), orderBy("createdAt", "desc"));
+    const unsubTrans = onSnapshot(qTrans, (snapshot) => {
+      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       setTransactions(docs);
 
       const dynamicExpense = new Set(DEFAULT_EXPENSE_CATEGORIES);
       const dynamicIncome = new Set(DEFAULT_INCOME_CATEGORIES);
-
       docs.forEach(t => {
         if (t.category) {
-          if (t.type === 'income') {
-            dynamicIncome.add(t.category);
-          } else {
-            dynamicExpense.add(t.category);
-          }
+          if (t.type === 'income') dynamicIncome.add(t.category);
+          else dynamicExpense.add(t.category);
         }
       });
-
       setExpenseCategories(Array.from(dynamicExpense));
       setIncomeCategories(Array.from(dynamicIncome));
-
-      setLoading(false);
-    }, (error) => {
-      console.error("Error reading Firestore:", error);
       setLoading(false);
     });
 
-    // 2. Sync Anggaran Per Kategori
-    const unsubscribeCategoryBudgets = onSnapshot(doc(db, "settings", "categoryBudgets"), (docSnap) => {
-      if (docSnap.exists()) {
-        setCategoryBudgets(docSnap.data() || {});
-      } else {
-        setCategoryBudgets({});
-      }
+    // 2. Anggaran Per Kategori
+    const unsubBudgets = onSnapshot(doc(db, "settings", "categoryBudgets"), (docSnap) => {
+      setCategoryBudgets(docSnap.exists() ? docSnap.data() || {} : {});
+    });
+
+    // 3. Utang & Piutang
+    const qDebts = query(collection(db, "debts"), orderBy("createdAt", "desc"));
+    const unsubDebts = onSnapshot(qDebts, (snapshot) => {
+      setDebts(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
+    // 4. Goals / Impian
+    const qGoals = query(collection(db, "goals"), orderBy("createdAt", "desc"));
+    const unsubGoals = onSnapshot(qGoals, (snapshot) => {
+      setGoals(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
     return () => {
-      unsubscribeTransactions();
-      unsubscribeCategoryBudgets();
+      unsubTrans();
+      unsubBudgets();
+      unsubDebts();
+      unsubGoals();
     };
   }, []);
 
-  // Action: Buka Modal Tambah Anggaran
+  // --- ACTIONS: UTANG & PIUTANG ---
+  const openAddDebtModal = () => {
+    setEditingDebtId(null);
+    setDebtType('utang');
+    setDebtPerson('');
+    setDebtTitle('');
+    setDebtAmount('');
+    setDebtDueDate('');
+    setShowDebtModal(true);
+  };
+
+  const openEditDebtModal = (d) => {
+    setEditingDebtId(d.id);
+    setDebtType(d.type);
+    setDebtPerson(d.person);
+    setDebtTitle(d.title);
+    setDebtAmount(d.amount.toString());
+    setDebtDueDate(d.dueDate || '');
+    setShowDebtModal(true);
+  };
+
+  const handleSaveDebt = async (e) => {
+    e.preventDefault();
+    if (!debtPerson || !debtAmount) return;
+
+    const payload = {
+      type: debtType,
+      person: debtPerson,
+      title: debtTitle || (debtType === 'utang' ? `Utang ke ${debtPerson}` : `Piutang pada ${debtPerson}`),
+      amount: Number(debtAmount),
+      dueDate: debtDueDate,
+      updatedAt: serverTimestamp()
+    };
+
+    try {
+      if (editingDebtId) {
+        await updateDoc(doc(db, "debts", editingDebtId), payload);
+      } else {
+        await addDoc(collection(db, "debts"), {
+          ...payload,
+          isPaid: false,
+          createdAt: serverTimestamp()
+        });
+      }
+      setShowDebtModal(false);
+    } catch (err) {
+      console.error(err);
+      alert("Gagal menyimpan catatan utang/piutang.");
+    }
+  };
+
+  const toggleDebtPaid = async (id, currentStatus) => {
+    try {
+      await updateDoc(doc(db, "debts", id), { isPaid: !currentStatus });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteDebt = async (id) => {
+    if (window.confirm("Hapus catatan ini?")) {
+      try { await deleteDoc(doc(db, "debts", id)); } catch (err) { console.error(err); }
+    }
+  };
+
+  // --- ACTIONS: GOALS / TARGET IMPIAN ---
+  const openAddGoalModal = () => {
+    setEditingGoalId(null);
+    setGoalTitle('');
+    setGoalTargetAmount('');
+    setGoalCurrentAmount('0');
+    setGoalTargetDate('');
+    setShowGoalModal(true);
+  };
+
+  const openEditGoalModal = (g) => {
+    setEditingGoalId(g.id);
+    setGoalTitle(g.title);
+    setGoalTargetAmount(g.targetAmount.toString());
+    setGoalCurrentAmount(g.currentAmount.toString());
+    setGoalTargetDate(g.targetDate || '');
+    setShowGoalModal(true);
+  };
+
+  const handleSaveGoal = async (e) => {
+    e.preventDefault();
+    if (!goalTitle || !goalTargetAmount) return;
+
+    const payload = {
+      title: goalTitle,
+      targetAmount: Number(goalTargetAmount),
+      currentAmount: Number(goalCurrentAmount) || 0,
+      targetDate: goalTargetDate,
+      updatedAt: serverTimestamp()
+    };
+
+    try {
+      if (editingGoalId) {
+        await updateDoc(doc(db, "goals", editingGoalId), payload);
+      } else {
+        await addDoc(collection(db, "goals"), {
+          ...payload,
+          createdAt: serverTimestamp()
+        });
+      }
+      setShowGoalModal(false);
+    } catch (err) {
+      console.error(err);
+      alert("Gagal menyimpan target impian.");
+    }
+  };
+
+  const handleAddGoalFund = async (e) => {
+    e.preventDefault();
+    if (!selectedGoal || !addFundAmount) return;
+
+    const newAmount = (selectedGoal.currentAmount || 0) + Number(addFundAmount);
+    try {
+      await updateDoc(doc(db, "goals", selectedGoal.id), {
+        currentAmount: newAmount,
+        updatedAt: serverTimestamp()
+      });
+      setShowAddGoalFundModal(false);
+      setAddFundAmount('');
+    } catch (err) {
+      console.error(err);
+      alert("Gagal menambah saldo impian.");
+    }
+  };
+
+  const handleDeleteGoal = async (id) => {
+    if (window.confirm("Hapus target impian ini?")) {
+      try { await deleteDoc(doc(db, "goals", id)); } catch (err) { console.error(err); }
+    }
+  };
+
+  // --- ACTIONS: ANGGARAN KATEGORI ---
   const openAddBudgetModal = () => {
     setIsEditingBudget(false);
     setBudgetCatName(expenseCategories[0] || 'Makanan');
@@ -156,7 +320,6 @@ export default function App() {
     setShowBudgetModal(true);
   };
 
-  // Action: Buka Modal Edit Anggaran
   const openEditBudgetModal = (catName, currentAmount) => {
     setIsEditingBudget(true);
     setBudgetCatName(catName);
@@ -166,7 +329,6 @@ export default function App() {
     setShowBudgetModal(true);
   };
 
-  // Action: Simpan Anggaran (Tambah / Edit)
   const handleSaveBudget = async (e) => {
     e.preventDefault();
     const finalCatName = isNewBudgetCatCustom && customBudgetCatName.trim()
@@ -185,12 +347,11 @@ export default function App() {
       }, { merge: true });
       setShowBudgetModal(false);
     } catch (error) {
-      console.error("Error saving budget:", error);
+      console.error(error);
       alert("Gagal menyimpan anggaran.");
     }
   };
 
-  // Action: Hapus Anggaran Kategori
   const handleDeleteBudget = async (catName) => {
     if (window.confirm(`Hapus anggaran untuk kategori "${catName}"?`)) {
       try {
@@ -198,12 +359,12 @@ export default function App() {
           [catName]: deleteField()
         });
       } catch (error) {
-        console.error("Error deleting budget:", error);
-        alert("Gagal menghapus anggaran.");
+        console.error(error);
       }
     }
   };
 
+  // --- TRANSAKSI STANDARD ---
   const handleTypeChange = (newType) => {
     setType(newType);
     setIsCustomCategory(false);
@@ -308,7 +469,7 @@ export default function App() {
       }
       setShowModal(false);
     } catch (error) {
-      console.error("Error saving doc:", error);
+      console.error(error);
       alert("Gagal menyimpan transaksi.");
     }
   };
@@ -318,7 +479,7 @@ export default function App() {
       try {
         await deleteDoc(doc(db, "transactions", id));
       } catch (error) {
-        console.error("Error deleting doc:", error);
+        console.error(error);
       }
     }
   };
@@ -385,12 +546,7 @@ export default function App() {
         const list = groups[dateKey];
         const income = list.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
         const expense = list.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
-        return {
-          date: dateKey,
-          items: list,
-          income,
-          expense
-        };
+        return { date: dateKey, items: list, income, expense };
       });
   }, [transactions]);
 
@@ -408,7 +564,6 @@ export default function App() {
   const papaPercent = monthExpense > 0 ? Math.round((papaMonthExpense / monthExpense) * 100) : 0;
   const mamaPercent = monthExpense > 0 ? Math.round((mamaMonthExpense / monthExpense) * 100) : 0;
 
-  // Group Expenses & Incomes by Category
   const categoryExpensesMap = useMemo(() => {
     const map = {};
     monthTransactions.filter(t => t.type === 'expense').forEach(t => {
@@ -417,9 +572,7 @@ export default function App() {
     return map;
   }, [monthTransactions]);
 
-  const categoryExpenses = useMemo(() => {
-    return Object.entries(categoryExpensesMap).sort((a, b) => b[1] - a[1]);
-  }, [categoryExpensesMap]);
+  const categoryExpenses = useMemo(() => Object.entries(categoryExpensesMap).sort((a, b) => b[1] - a[1]), [categoryExpensesMap]);
 
   const categoryIncomes = useMemo(() => {
     const map = {};
@@ -429,25 +582,18 @@ export default function App() {
     return Object.entries(map).sort((a, b) => b[1] - a[1]);
   }, [monthTransactions]);
 
-  // Total Budget dari Seluruh Anggaran Kategori
-  const totalCategoryBudget = useMemo(() => {
-    return Object.values(categoryBudgets).reduce((sum, val) => sum + (Number(val) || 0), 0);
-  }, [categoryBudgets]);
-
+  const totalCategoryBudget = useMemo(() => Object.values(categoryBudgets).reduce((sum, val) => sum + (Number(val) || 0), 0), [categoryBudgets]);
   const budgetRemaining = totalCategoryBudget - monthExpense;
   const isOverBudget = totalCategoryBudget > 0 && monthExpense > totalCategoryBudget;
+  const budgetCategoryList = useMemo(() => Object.entries(categoryBudgets), [categoryBudgets]);
+  const allUniqueCategories = useMemo(() => Array.from(new Set([...expenseCategories, ...incomeCategories])), [expenseCategories, incomeCategories]);
 
-  const budgetCategoryList = useMemo(() => {
-    return Object.entries(categoryBudgets);
-  }, [categoryBudgets]);
-
-  const allUniqueCategories = useMemo(() => {
-    return Array.from(new Set([...expenseCategories, ...incomeCategories]));
-  }, [expenseCategories, incomeCategories]);
+  // Kalkulasi Ringkasan Utang & Piutang
+  const totalUtangUnpaid = useMemo(() => debts.filter(d => d.type === 'utang' && !d.isPaid).reduce((s, d) => s + d.amount, 0), [debts]);
+  const totalPiutangUnpaid = useMemo(() => debts.filter(d => d.type === 'piutang' && !d.isPaid).reduce((s, d) => s + d.amount, 0), [debts]);
 
   const periodTotals = useMemo(() => {
     const now = new Date();
-    
     const currentDay = now.getDay();
     const diffToMon = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1);
     const monday = new Date(now.setDate(diffToMon));
@@ -456,12 +602,7 @@ export default function App() {
     sunday.setDate(monday.getDate() + 6);
     sunday.setHours(23, 59, 59, 999);
 
-    const weekTransactions = transactions.filter(t => {
-      if (!t.date) return false;
-      const d = new Date(t.date);
-      return d >= monday && d <= sunday;
-    });
-
+    const weekTransactions = transactions.filter(t => t.date && new Date(t.date) >= monday && new Date(t.date) <= sunday);
     const weekIncome = weekTransactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
     const weekExpense = weekTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
 
@@ -475,15 +616,7 @@ export default function App() {
     const yIncome = yTransactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
     const yExpense = yTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
 
-    return {
-      weekIncome,
-      weekExpense,
-      monthIncome: mIncome,
-      monthExpense: mExpense,
-      yearIncome: yIncome,
-      yearExpense: yExpense,
-      activeYearStr
-    };
+    return { weekIncome, weekExpense, monthIncome: mIncome, monthExpense: mExpense, yearIncome: yIncome, yearExpense: yExpense, activeYearStr };
   }, [transactions, filterMonth]);
 
   return (
@@ -537,10 +670,9 @@ export default function App() {
         </div>
       </div>
 
-      {/* Main Content Area */}
+      {/* TAB: BERANDA */}
       {activeTab === 'beranda' && (
         <div className="p-4 space-y-4">
-          {/* Status Singkat Anggaran di Beranda */}
           {totalCategoryBudget > 0 && (
             <div className="bg-white p-3.5 rounded-2xl border shadow-sm flex items-center justify-between">
               <div className="flex items-center gap-2.5">
@@ -563,7 +695,6 @@ export default function App() {
             </div>
           )}
 
-          {/* Breakdown Papa vs Mama */}
           <div className="bg-white p-4 rounded-2xl shadow-sm border">
             <div className="flex justify-between items-center mb-2">
               <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
@@ -581,16 +712,12 @@ export default function App() {
             </div>
           </div>
 
-          {/* Transaksi Dikelompokkan Per Tanggal */}
           <div>
             <div className="flex justify-between items-center mb-3">
               <h3 className="text-sm font-bold text-slate-700 flex items-center gap-1">
                 <Calendar size={16} /> Catatan Per Hari
               </h3>
-              <button 
-                onClick={() => setActiveTab('riwayat')} 
-                className="text-xs text-teal-600 font-semibold hover:underline"
-              >
+              <button onClick={() => setActiveTab('riwayat')} className="text-xs text-teal-600 font-semibold hover:underline">
                 Lihat Semua
               </button>
             </div>
@@ -639,12 +766,8 @@ export default function App() {
                             <span className={`text-sm font-bold mr-1 ${t.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
                               {t.type === 'income' ? '+' : '-'}{formatRupiah(t.amount)}
                             </span>
-                            <button onClick={() => openEditModal(t)} className="text-slate-300 hover:text-teal-600 p-1" title="Edit">
-                              <Edit2 size={15} />
-                            </button>
-                            <button onClick={() => handleDelete(t.id)} className="text-slate-300 hover:text-rose-500 p-1" title="Hapus">
-                              <Trash2 size={15} />
-                            </button>
+                            <button onClick={() => openEditModal(t)} className="text-slate-300 hover:text-teal-600 p-1"><Edit2 size={15} /></button>
+                            <button onClick={() => handleDelete(t.id)} className="text-slate-300 hover:text-rose-500 p-1"><Trash2 size={15} /></button>
                           </div>
                         </div>
                       ))}
@@ -657,10 +780,9 @@ export default function App() {
         </div>
       )}
 
-      {/* Tab Anggaran (Tambah, Edit, Hapus Anggaran Per Kategori) */}
+      {/* TAB: ANGGARAN */}
       {activeTab === 'anggaran' && (
         <div className="p-4 space-y-4">
-          {/* Header Summary Total Anggaran */}
           <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
             <div className="flex justify-between items-center">
               <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
@@ -686,12 +808,9 @@ export default function App() {
             </div>
           </div>
 
-          {/* List Anggaran Kategori */}
           <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
             <div className="flex justify-between items-center">
-              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                Daftar Anggaran Kategori
-              </h3>
+              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Daftar Anggaran Kategori</h3>
               <span className="text-[11px] text-slate-400">{budgetCategoryList.length} Kategori Diatur</span>
             </div>
 
@@ -716,7 +835,7 @@ export default function App() {
                   const catRem = targetNum - spent;
 
                   return (
-                    <div key={cat} className="p-3.5 bg-slate-50 rounded-2xl border space-y-2 hover:shadow-sm transition">
+                    <div key={cat} className="p-3.5 bg-slate-50 rounded-2xl border space-y-2">
                       <div className="flex justify-between items-start">
                         <div>
                           <h4 className="text-xs font-bold text-slate-800">{cat}</h4>
@@ -730,31 +849,12 @@ export default function App() {
                           }`}>
                             {catOver ? `Over ${formatRupiah(Math.abs(catRem))}` : `Sisa ${formatRupiah(catRem)}`}
                           </span>
-                          <button 
-                            onClick={() => openEditBudgetModal(cat, targetNum)} 
-                            className="text-slate-400 hover:text-teal-600 p-1"
-                            title="Edit Anggaran"
-                          >
-                            <Edit2 size={14} />
-                          </button>
-                          <button 
-                            onClick={() => handleDeleteBudget(cat)} 
-                            className="text-slate-400 hover:text-rose-500 p-1"
-                            title="Hapus Anggaran"
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                          <button onClick={() => openEditBudgetModal(cat, targetNum)} className="text-slate-400 hover:text-teal-600 p-1"><Edit2 size={14} /></button>
+                          <button onClick={() => handleDeleteBudget(cat)} className="text-slate-400 hover:text-rose-500 p-1"><Trash2 size={14} /></button>
                         </div>
                       </div>
-
-                      {/* Progress Bar Kategori */}
                       <div className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
-                        <div 
-                          className={`h-full rounded-full transition-all duration-300 ${
-                            catOver ? 'bg-rose-500' : percent > 80 ? 'bg-amber-500' : 'bg-teal-500'
-                          }`}
-                          style={{ width: `${percent}%` }}
-                        ></div>
+                        <div className={`h-full rounded-full transition-all duration-300 ${catOver ? 'bg-rose-500' : percent > 80 ? 'bg-amber-500' : 'bg-teal-500'}`} style={{ width: `${percent}%` }}></div>
                       </div>
                     </div>
                   );
@@ -765,7 +865,184 @@ export default function App() {
         </div>
       )}
 
-      {/* Tab Statistik Sederhana */}
+      {/* TAB: FITUR LAIN (UTANG & PIUTANG + GOALS) */}
+      {activeTab === 'fitur_lain' && (
+        <div className="p-4 space-y-4">
+          {/* Sub Switcher Utang vs Goals */}
+          <div className="grid grid-cols-2 gap-2 p-1 bg-white border rounded-2xl text-xs font-bold shadow-sm">
+            <button
+              onClick={() => setSubTabFitur('utang')}
+              className={`py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 ${subTabFitur === 'utang' ? 'bg-teal-600 text-white shadow' : 'text-slate-500 hover:text-slate-800'}`}
+            >
+              <HandCoins size={16} /> Utang & Piutang
+            </button>
+            <button
+              onClick={() => setSubTabFitur('goals')}
+              className={`py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 ${subTabFitur === 'goals' ? 'bg-teal-600 text-white shadow' : 'text-slate-500 hover:text-slate-800'}`}
+            >
+              <Trophy size={16} /> Target Impian (Goals)
+            </button>
+          </div>
+
+          {/* SUBTAB UTANG & PIUTANG */}
+          {subTabFitur === 'utang' && (
+            <div className="space-y-4">
+              {/* Summary Card Utang & Piutang */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-white p-3.5 rounded-2xl border shadow-sm">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase block">Utang Saya (Belum Lunas)</span>
+                  <span className="text-sm font-bold text-rose-600">{formatRupiah(totalUtangUnpaid)}</span>
+                </div>
+                <div className="bg-white p-3.5 rounded-2xl border shadow-sm">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase block">Piutang Saya (Belum Lunas)</span>
+                  <span className="text-sm font-bold text-emerald-600">{formatRupiah(totalPiutangUnpaid)}</span>
+                </div>
+              </div>
+
+              {/* Main Card Utang & Piutang */}
+              <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Catatan Utang & Piutang</h3>
+                  <button 
+                    onClick={openAddDebtModal}
+                    className="text-xs bg-teal-600 text-white hover:bg-teal-700 font-bold px-3 py-1.5 rounded-xl transition flex items-center gap-1 shadow-sm"
+                  >
+                    <Plus size={14} /> Tambah Catatan
+                  </button>
+                </div>
+
+                {debts.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-6">Belum ada catatan utang atau piutang.</p>
+                ) : (
+                  <div className="space-y-2.5">
+                    {debts.map((d) => (
+                      <div key={d.id} className={`p-3.5 rounded-2xl border flex items-center justify-between transition ${d.isPaid ? 'bg-slate-50 opacity-60 border-slate-200' : 'bg-white shadow-sm border-slate-200'}`}>
+                        <div className="flex items-center gap-3">
+                          <button 
+                            onClick={() => toggleDebtPaid(d.id, d.isPaid)}
+                            className={`p-2 rounded-xl transition ${d.isPaid ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400 hover:text-emerald-600'}`}
+                            title={d.isPaid ? "Tandai Belum Lunas" : "Tandai Lunas"}
+                          >
+                            <Check size={16} />
+                          </button>
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${d.type === 'utang' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                {d.type === 'utang' ? 'UTANG' : 'PIUTANG'}
+                              </span>
+                              <h4 className={`text-xs font-bold ${d.isPaid ? 'line-through text-slate-500' : 'text-slate-800'}`}>{d.person}</h4>
+                            </div>
+                            <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+                              {d.title} {d.dueDate && `• Tempo: ${d.dueDate}`}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="text-right flex items-center gap-2">
+                          <div>
+                            <p className={`text-xs font-bold ${d.type === 'utang' ? 'text-rose-600' : 'text-emerald-600'}`}>
+                              {formatRupiah(d.amount)}
+                            </p>
+                            <span className="text-[10px] font-semibold text-slate-400 block">{d.isPaid ? 'Lunas' : 'Belum Lunas'}</span>
+                          </div>
+                          <button onClick={() => openEditDebtModal(d)} className="text-slate-300 hover:text-teal-600 p-1"><Edit2 size={14} /></button>
+                          <button onClick={() => handleDeleteDebt(d.id)} className="text-slate-300 hover:text-rose-500 p-1"><Trash2 size={14} /></button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* SUBTAB GOALS / TARGET IMPIAN */}
+          {subTabFitur === 'goals' && (
+            <div className="space-y-4">
+              <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                    <Trophy size={14} /> Target Tabungan & Impian
+                  </h3>
+                  <button 
+                    onClick={openAddGoalModal}
+                    className="text-xs bg-teal-600 text-white hover:bg-teal-700 font-bold px-3 py-1.5 rounded-xl transition flex items-center gap-1 shadow-sm"
+                  >
+                    <Plus size={14} /> Buat Impian
+                  </button>
+                </div>
+
+                {goals.length === 0 ? (
+                  <div className="text-center py-8 border border-dashed rounded-2xl bg-slate-50 p-4 space-y-2">
+                    <Trophy size={32} className="mx-auto text-slate-400" />
+                    <p className="text-xs font-semibold text-slate-600">Belum ada target impian yang dibuat.</p>
+                    <button 
+                      onClick={openAddGoalModal}
+                      className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition shadow"
+                    >
+                      + Buat Impian Baru
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {goals.map((g) => {
+                      const percent = g.targetAmount > 0 ? Math.min(Math.round((g.currentAmount / g.targetAmount) * 100), 100) : 0;
+                      const isReached = g.currentAmount >= g.targetAmount;
+
+                      return (
+                        <div key={g.id} className="p-3.5 bg-slate-50 rounded-2xl border space-y-2.5">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <h4 className="text-xs font-bold text-slate-800">{g.title}</h4>
+                                {isReached && (
+                                  <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                                    Tercapai! 🎉
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-slate-400 font-medium mt-0.5">
+                                Terkumpul: <span className="font-bold text-teal-600">{formatRupiah(g.currentAmount)}</span> dari {formatRupiah(g.targetAmount)}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-1">
+                              <button 
+                                onClick={() => {
+                                  setSelectedGoal(g);
+                                  setAddFundAmount('');
+                                  setShowAddGoalFundModal(true);
+                                }}
+                                className="text-[11px] bg-teal-600 hover:bg-teal-700 text-white font-bold px-2.5 py-1 rounded-xl transition flex items-center gap-1 shadow-sm"
+                              >
+                                <Coins size={12} /> + Tabung
+                              </button>
+                              <button onClick={() => openEditGoalModal(g)} className="text-slate-400 hover:text-teal-600 p-1"><Edit2 size={14} /></button>
+                              <button onClick={() => handleDeleteGoal(g.id)} className="text-slate-400 hover:text-rose-500 p-1"><Trash2 size={14} /></button>
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="flex justify-between text-[10px] font-bold mb-1 text-slate-500">
+                              <span>Progress Tabungan</span>
+                              <span>{percent}%</span>
+                            </div>
+                            <div className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
+                              <div className="bg-teal-500 h-full rounded-full transition-all duration-300" style={{ width: `${percent}%` }}></div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB: STATISTIK */}
       {activeTab === 'statistik' && (
         <div className="p-4 space-y-4">
           <div className="flex items-center justify-between bg-white p-3 rounded-2xl border shadow-sm">
@@ -780,12 +1057,10 @@ export default function App() {
             />
           </div>
 
-          {/* Statistik Pengeluaran per Kategori */}
           <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
               <BarChart3 size={14} /> Pengeluaran per Kategori ({filterMonth})
             </h3>
-
             {categoryExpenses.length === 0 ? (
               <p className="text-xs text-slate-400 text-center py-4">Belum ada pengeluaran di bulan ini.</p>
             ) : (
@@ -806,12 +1081,10 @@ export default function App() {
             )}
           </div>
 
-          {/* Statistik Pemasukan per Kategori */}
           <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
               <BarChart3 size={14} /> Pemasukan per Kategori ({filterMonth})
             </h3>
-
             {categoryIncomes.length === 0 ? (
               <p className="text-xs text-slate-400 text-center py-4">Belum ada pemasukan di bulan ini.</p>
             ) : (
@@ -834,27 +1107,24 @@ export default function App() {
         </div>
       )}
 
-      {/* Tab Riwayat */}
+      {/* TAB: RIWAYAT */}
       {activeTab === 'riwayat' && (
         <div className="p-4 space-y-3">
           <div className="bg-white p-3.5 rounded-2xl border shadow-sm space-y-2.5">
             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
               <CalendarDays size={14} /> Rekap Keuangan Periode
             </h3>
-
             <div className="grid grid-cols-3 gap-2 text-center text-xs">
               <div className="bg-slate-50 p-2 rounded-xl border">
                 <span className="block text-[10px] font-bold text-slate-400 uppercase">Minggu Ini</span>
                 <p className="text-[11px] font-bold text-emerald-600 mt-1">+{formatRupiah(periodTotals.weekIncome)}</p>
                 <p className="text-[11px] font-bold text-rose-600">-{formatRupiah(periodTotals.weekExpense)}</p>
               </div>
-
               <div className="bg-slate-50 p-2 rounded-xl border">
                 <span className="block text-[10px] font-bold text-slate-400 uppercase">Bulan Ini</span>
                 <p className="text-[11px] font-bold text-emerald-600 mt-1">+{formatRupiah(periodTotals.monthIncome)}</p>
                 <p className="text-[11px] font-bold text-rose-600">-{formatRupiah(periodTotals.monthExpense)}</p>
               </div>
-
               <div className="bg-slate-50 p-2 rounded-xl border">
                 <span className="block text-[10px] font-bold text-slate-400 uppercase">Tahun ({periodTotals.activeYearStr})</span>
                 <p className="text-[11px] font-bold text-emerald-600 mt-1">+{formatRupiah(periodTotals.yearIncome)}</p>
@@ -879,37 +1149,18 @@ export default function App() {
               <Filter size={14} /> Filter Data
             </div>
             <div className="grid grid-cols-3 gap-1.5 text-xs">
-              <select 
-                value={filterUser} 
-                onChange={(e) => setFilterUser(e.target.value)}
-                className="p-1.5 bg-slate-50 border rounded-xl font-medium"
-              >
+              <select value={filterUser} onChange={(e) => setFilterUser(e.target.value)} className="p-1.5 bg-slate-50 border rounded-xl font-medium">
                 <option value="Semua">Semua Orang</option>
                 <option value="Papa">Papa</option>
                 <option value="Mama">Mama</option>
               </select>
-
-              <select 
-                value={filterCategory} 
-                onChange={(e) => setFilterCategory(e.target.value)}
-                className="p-1.5 bg-slate-50 border rounded-xl font-medium truncate"
-              >
+              <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className="p-1.5 bg-slate-50 border rounded-xl font-medium truncate">
                 <option value="Semua">Semua Kategori</option>
                 {allUniqueCategories.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
-
-              <input 
-                type="month" 
-                value={filterMonth}
-                onChange={(e) => setFilterMonth(e.target.value)}
-                className="p-1.5 bg-slate-50 border rounded-xl font-medium"
-              />
+              <input type="month" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} className="p-1.5 bg-slate-50 border rounded-xl font-medium" />
             </div>
-
-            <button 
-              onClick={handleExportCSV}
-              className="w-full py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition"
-            >
+            <button onClick={handleExportCSV} className="w-full py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition">
               <Download size={14} /> Unduh Laporan Excel (CSV)
             </button>
           </div>
@@ -939,12 +1190,8 @@ export default function App() {
                     <span className={`text-sm font-bold mr-1 ${t.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
                       {t.type === 'income' ? '+' : '-'}{formatRupiah(t.amount)}
                     </span>
-                    <button onClick={() => openEditModal(t)} className="text-slate-300 hover:text-teal-600 p-1">
-                      <Edit2 size={15} />
-                    </button>
-                    <button onClick={() => handleDelete(t.id)} className="text-slate-300 hover:text-rose-500 p-1">
-                      <Trash2 size={15} />
-                    </button>
+                    <button onClick={() => openEditModal(t)} className="text-slate-300 hover:text-teal-600 p-1"><Edit2 size={15} /></button>
+                    <button onClick={() => handleDelete(t.id)} className="text-slate-300 hover:text-rose-500 p-1"><Trash2 size={15} /></button>
                   </div>
                 </div>
               ))
@@ -953,18 +1200,18 @@ export default function App() {
         </div>
       )}
 
-      {/* Navigasi Bawah */}
+      {/* Navigasi Bawah Utama */}
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t p-2 flex justify-around items-center shadow-lg z-40">
         <button 
           onClick={() => setActiveTab('beranda')}
-          className={`flex flex-col items-center gap-1 p-2 rounded-xl text-xs font-semibold ${activeTab === 'beranda' ? 'text-teal-600' : 'text-slate-400'}`}
+          className={`flex flex-col items-center gap-1 p-2 rounded-xl text-[11px] font-semibold ${activeTab === 'beranda' ? 'text-teal-600' : 'text-slate-400'}`}
         >
           <Home size={18} /> Beranda
         </button>
 
         <button 
           onClick={() => setActiveTab('anggaran')}
-          className={`flex flex-col items-center gap-1 p-2 rounded-xl text-xs font-semibold ${activeTab === 'anggaran' ? 'text-teal-600' : 'text-slate-400'}`}
+          className={`flex flex-col items-center gap-1 p-2 rounded-xl text-[11px] font-semibold ${activeTab === 'anggaran' ? 'text-teal-600' : 'text-slate-400'}`}
         >
           <Target size={18} /> Anggaran
         </button>
@@ -977,21 +1224,215 @@ export default function App() {
         </button>
 
         <button 
-          onClick={() => setActiveTab('statistik')}
-          className={`flex flex-col items-center gap-1 p-2 rounded-xl text-xs font-semibold ${activeTab === 'statistik' ? 'text-teal-600' : 'text-slate-400'}`}
+          onClick={() => setActiveTab('fitur_lain')}
+          className={`flex flex-col items-center gap-1 p-2 rounded-xl text-[11px] font-semibold ${activeTab === 'fitur_lain' ? 'text-teal-600' : 'text-slate-400'}`}
         >
-          <PieChart size={18} /> Statistik
+          <HandCoins size={18} /> Fitur Lain
         </button>
 
         <button 
           onClick={() => setActiveTab('riwayat')}
-          className={`flex flex-col items-center gap-1 p-2 rounded-xl text-xs font-semibold ${activeTab === 'riwayat' ? 'text-teal-600' : 'text-slate-400'}`}
+          className={`flex flex-col items-center gap-1 p-2 rounded-xl text-[11px] font-semibold ${activeTab === 'riwayat' ? 'text-teal-600' : 'text-slate-400'}`}
         >
           <List size={18} /> Riwayat
         </button>
       </div>
 
-      {/* Modal Tambah / Edit Anggaran Kategori */}
+      {/* MODAL UTANG & PIUTANG */}
+      {showDebtModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-in fade-in duration-200">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-base font-bold text-slate-800">
+                {editingDebtId ? 'Edit Catatan' : 'Tambah Catatan Utang / Piutang'}
+              </h3>
+              <button onClick={() => setShowDebtModal(false)} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
+            </div>
+
+            <form onSubmit={handleSaveDebt} className="space-y-3.5">
+              <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setDebtType('utang')}
+                  className={`py-2 rounded-lg transition ${debtType === 'utang' ? 'bg-rose-500 text-white shadow' : 'text-slate-500'}`}
+                >
+                  Utang Saya
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDebtType('piutang')}
+                  className={`py-2 rounded-lg transition ${debtType === 'piutang' ? 'bg-emerald-500 text-white shadow' : 'text-slate-500'}`}
+                >
+                  Piutang Saya
+                </button>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">
+                  {debtType === 'utang' ? 'Pemberi Pinjaman' : 'Peminjam'}
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="Nama orang / pihak"
+                  value={debtPerson}
+                  onChange={(e) => setDebtPerson(e.target.value)}
+                  className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Keterangan / Catatan</label>
+                <input 
+                  type="text" 
+                  placeholder="Misal: Pinjam uang bensin, Talangan belanja"
+                  value={debtTitle}
+                  onChange={(e) => setDebtTitle(e.target.value)}
+                  className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Nominal (Rp)</label>
+                <input 
+                  type="number" 
+                  placeholder="0"
+                  value={debtAmount}
+                  onChange={(e) => setDebtAmount(e.target.value)}
+                  className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Jatuh Tempo (Opsional)</label>
+                <input 
+                  type="date" 
+                  value={debtDueDate}
+                  onChange={(e) => setDebtDueDate(e.target.value)}
+                  className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button type="button" onClick={() => setShowDebtModal(false)} className="w-1/2 py-2.5 border rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100">
+                  Batal
+                </button>
+                <button type="submit" className="w-1/2 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs shadow-md transition">
+                  Simpan
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL GOALS / TARGET IMPIAN */}
+      {showGoalModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-in fade-in duration-200">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-base font-bold text-slate-800">
+                {editingGoalId ? 'Edit Target Impian' : 'Buat Target Impian Baru'}
+              </h3>
+              <button onClick={() => setShowGoalModal(false)} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
+            </div>
+
+            <form onSubmit={handleSaveGoal} className="space-y-3.5">
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Nama Impian / Goal</label>
+                <input 
+                  type="text" 
+                  placeholder="Misal: Beli Laptop Baru, Liburan Akhir Tahun"
+                  value={goalTitle}
+                  onChange={(e) => setGoalTitle(e.target.value)}
+                  className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Target Nominal (Rp)</label>
+                <input 
+                  type="number" 
+                  placeholder="0"
+                  value={goalTargetAmount}
+                  onChange={(e) => setGoalTargetAmount(e.target.value)}
+                  className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Saldo Terkumpul Saat Ini (Rp)</label>
+                <input 
+                  type="number" 
+                  placeholder="0"
+                  value={goalCurrentAmount}
+                  onChange={(e) => setGoalCurrentAmount(e.target.value)}
+                  className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Target Tanggal (Opsional)</label>
+                <input 
+                  type="date" 
+                  value={goalTargetDate}
+                  onChange={(e) => setGoalTargetDate(e.target.value)}
+                  className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button type="button" onClick={() => setShowGoalModal(false)} className="w-1/2 py-2.5 border rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100">
+                  Batal
+                </button>
+                <button type="submit" className="w-1/2 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs shadow-md transition">
+                  Simpan Impian
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL TAMBAH SALDO TABUNGAN GOAL */}
+      {showAddGoalFundModal && selectedGoal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-in fade-in duration-200">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-base font-bold text-slate-800">Tambah Tabungan: {selectedGoal.title}</h3>
+              <button onClick={() => setShowAddGoalFundModal(false)} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
+            </div>
+
+            <form onSubmit={handleAddGoalFund} className="space-y-3.5">
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Nominal yang Ditabung (Rp)</label>
+                <input 
+                  type="number" 
+                  placeholder="Contoh: 100000"
+                  value={addFundAmount}
+                  onChange={(e) => setAddFundAmount(e.target.value)}
+                  className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
+                  required
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button type="button" onClick={() => setShowAddGoalFundModal(false)} className="w-1/2 py-2.5 border rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100">
+                  Batal
+                </button>
+                <button type="submit" className="w-1/2 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs shadow-md transition">
+                  Tambah Saldo
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ANGGARAN KATEGORI */}
       {showBudgetModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-in fade-in duration-200">
@@ -999,13 +1440,10 @@ export default function App() {
               <h3 className="text-base font-bold text-slate-800">
                 {isEditingBudget ? 'Edit Anggaran Kategori' : 'Tambah Anggaran Kategori'}
               </h3>
-              <button onClick={() => setShowBudgetModal(false)} className="text-slate-400 hover:text-slate-600">
-                <X size={20} />
-              </button>
+              <button onClick={() => setShowBudgetModal(false)} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
             </div>
 
             <form onSubmit={handleSaveBudget} className="space-y-3.5">
-              {/* Kategori Selector */}
               <div>
                 <div className="flex justify-between items-center mb-1">
                   <label className="text-[11px] font-bold text-slate-500 uppercase">Kategori Pengeluaran</label>
@@ -1021,12 +1459,7 @@ export default function App() {
                 </div>
 
                 {isEditingBudget ? (
-                  <input 
-                    type="text" 
-                    value={budgetCatName} 
-                    disabled 
-                    className="w-full p-2.5 text-xs bg-slate-100 border rounded-xl font-bold text-slate-600"
-                  />
+                  <input type="text" value={budgetCatName} disabled className="w-full p-2.5 text-xs bg-slate-100 border rounded-xl font-bold text-slate-600" />
                 ) : isNewBudgetCatCustom ? (
                   <input 
                     type="text" 
@@ -1050,9 +1483,7 @@ export default function App() {
               </div>
 
               <div>
-                <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">
-                  Batas Anggaran Bulanan (Rp)
-                </label>
+                <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Batas Anggaran Bulanan (Rp)</label>
                 <input 
                   type="number" 
                   placeholder="Contoh: 1500000"
@@ -1064,17 +1495,10 @@ export default function App() {
               </div>
 
               <div className="flex gap-2 pt-2">
-                <button 
-                  type="button" 
-                  onClick={() => setShowBudgetModal(false)}
-                  className="w-1/2 py-2.5 border rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"
-                >
+                <button type="button" onClick={() => setShowBudgetModal(false)} className="w-1/2 py-2.5 border rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100">
                   Batal
                 </button>
-                <button 
-                  type="submit"
-                  className="w-1/2 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs shadow-md transition"
-                >
+                <button type="submit" className="w-1/2 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs shadow-md transition">
                   {isEditingBudget ? 'Simpan Perubahan' : 'Tambah Anggaran'}
                 </button>
               </div>
@@ -1083,7 +1507,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Modal Input & Edit Transaksi */}
+      {/* MODAL INPUT & EDIT TRANSAKSI */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end justify-center z-50 p-4">
           <div className="bg-white w-full max-w-md rounded-3xl p-5 shadow-2xl animate-in slide-in-from-bottom duration-200 max-h-[90vh] overflow-y-auto">
@@ -1091,9 +1515,7 @@ export default function App() {
               <h3 className="text-base font-bold text-slate-800">
                 {editingId ? 'Edit Transaksi' : 'Tambah Transaksi Baru'}
               </h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600">
-                <X size={20} />
-              </button>
+              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-3.5">
@@ -1117,21 +1539,11 @@ export default function App() {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Tanggal</label>
-                  <input 
-                    type="date" 
-                    value={date}
-                    onChange={(e) => setDate(e.target.value)}
-                    className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
-                    required
-                  />
+                  <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500" required />
                 </div>
                 <div>
                   <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Pencatat</label>
-                  <select 
-                    value={user} 
-                    onChange={(e) => setUser(e.target.value)}
-                    className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
-                  >
+                  <select value={user} onChange={(e) => setUser(e.target.value)} className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500">
                     <option value="Papa">Papa</option>
                     <option value="Mama">Mama</option>
                   </select>
@@ -1162,11 +1574,7 @@ export default function App() {
                     required
                   />
                 ) : (
-                  <select 
-                    value={category} 
-                    onChange={(e) => setCategory(e.target.value)}
-                    className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
-                  >
+                  <select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500">
                     {(type === 'income' ? incomeCategories : expenseCategories).map((c) => (
                       <option key={c} value={c}>{c}</option>
                     ))}
@@ -1237,10 +1645,7 @@ export default function App() {
                 )}
               </div>
 
-              <button 
-                type="submit"
-                className="w-full py-3 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs shadow-md transition"
-              >
+              <button type="submit" className="w-full py-3 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs shadow-md transition">
                 {editingId ? 'Simpan Perubahan' : 'Tambah Transaksi'}
               </button>
             </form>
