@@ -40,7 +40,8 @@ import {
   HandCoins,
   Trophy,
   Check,
-  Coins
+  Coins,
+  RotateCcw
 } from 'lucide-react';
 
 // --- FIREBASE CONFIGURATION ---
@@ -64,6 +65,7 @@ export default function App() {
   const [categoryBudgets, setCategoryBudgets] = useState({});
   const [debts, setDebts] = useState([]);
   const [goals, setGoals] = useState([]);
+  const [initialBalance, setInitialBalance] = useState(0);
   const [loading, setLoading] = useState(true);
   
   // Navigation States
@@ -76,6 +78,7 @@ export default function App() {
   const [showDebtModal, setShowDebtModal] = useState(false);
   const [showGoalModal, setShowGoalModal] = useState(false);
   const [showAddGoalFundModal, setShowAddGoalFundModal] = useState(false);
+  const [showInitialBalanceModal, setShowInitialBalanceModal] = useState(false);
 
   // Form States Transaksi
   const [editingId, setEditingId] = useState(null);
@@ -88,6 +91,9 @@ export default function App() {
   const [isCustomCategory, setIsCustomCategory] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
+  // Form States Saldo Awal
+  const [inputInitialBalance, setInputInitialBalance] = useState('0');
+
   // Form States Modal Anggaran
   const [budgetCatName, setBudgetCatName] = useState('');
   const [isNewBudgetCatCustom, setIsNewBudgetCatCustom] = useState(false);
@@ -97,13 +103,13 @@ export default function App() {
 
   // Form States Utang & Piutang
   const [editingDebtId, setEditingDebtId] = useState(null);
-  const [debtType, setDebtType] = useState('utang'); // 'utang' atau 'piutang'
+  const [debtType, setDebtType] = useState('utang');
   const [debtPerson, setDebtPerson] = useState('');
   const [debtTitle, setDebtTitle] = useState('');
   const [debtAmount, setDebtAmount] = useState('');
   const [debtDueDate, setDebtDueDate] = useState('');
 
-  // Form States Goals / Impian
+  // Form States Goals
   const [editingGoalId, setEditingGoalId] = useState(null);
   const [goalTitle, setGoalTitle] = useState('');
   const [goalTargetAmount, setGoalTargetAmount] = useState('');
@@ -166,13 +172,56 @@ export default function App() {
       setGoals(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
+    // 5. Saldo Awal Bulan
+    const unsubInitBalance = onSnapshot(doc(db, "settings", "initialBalance"), (docSnap) => {
+      if (docSnap.exists()) {
+        const val = docSnap.data().amount || 0;
+        setInitialBalance(val);
+        setInputInitialBalance(val.toString());
+      } else {
+        setInitialBalance(0);
+        setInputInitialBalance('0');
+      }
+    });
+
     return () => {
       unsubTrans();
       unsubBudgets();
       unsubDebts();
       unsubGoals();
+      unsubInitBalance();
     };
   }, []);
+
+  // --- ACTIONS: SALDO AWAL ---
+  const handleSaveInitialBalance = async (e) => {
+    e.preventDefault();
+    const val = Number(inputInitialBalance) || 0;
+    try {
+      await setDoc(doc(db, "settings", "initialBalance"), {
+        amount: val,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      setShowInitialBalanceModal(false);
+    } catch (err) {
+      console.error(err);
+      alert("Gagal menyimpan saldo awal.");
+    }
+  };
+
+  const handleResetInitialBalanceToZero = async () => {
+    try {
+      await setDoc(doc(db, "settings", "initialBalance"), {
+        amount: 0,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      setInputInitialBalance('0');
+      setShowInitialBalanceModal(false);
+    } catch (err) {
+      console.error(err);
+      alert("Gagal mereset saldo awal.");
+    }
+  };
 
   // --- ACTIONS: UTANG & PIUTANG ---
   const openAddDebtModal = () => {
@@ -530,9 +579,12 @@ export default function App() {
     });
   }, [transactions, searchTerm, filterUser, filterCategory, filterMonth]);
 
+  // Kelompokkan Transaksi Khusus Bulan Aktif (Full 1 Bulan)
   const groupedTransactions = useMemo(() => {
     const groups = {};
-    transactions.forEach(t => {
+    const monthFiltered = transactions.filter(t => t.date && t.date.startsWith(filterMonth));
+
+    monthFiltered.forEach(t => {
       const dateKey = t.date || 'Lainnya';
       if (!groups[dateKey]) {
         groups[dateKey] = [];
@@ -548,7 +600,7 @@ export default function App() {
         const expense = list.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
         return { date: dateKey, items: list, income, expense };
       });
-  }, [transactions]);
+  }, [transactions, filterMonth]);
 
   const todayTransactions = transactions.filter(t => t.date === todayStr);
   const todayIncome = todayTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
@@ -651,12 +703,18 @@ export default function App() {
           </div>
         </div>
 
-        {/* Total Saldo Bulan Ini */}
+        {/* Total Saldo Bulan Ini (Termasuk Saldo Awal) */}
         <div className="bg-gradient-to-br from-indigo-600 to-purple-600 text-white rounded-2xl p-4 shadow-md">
-          <div className="flex justify-between items-center text-xs opacity-80 mb-1">
-            <span className="flex items-center gap-1"><Wallet size={14} /> Saldo Periode ({filterMonth})</span>
+          <div className="flex justify-between items-center text-xs opacity-90 mb-1">
+            <span className="flex items-center gap-1"><Wallet size={14} /> Total Saldo Periode ({filterMonth})</span>
+            <button 
+              onClick={() => setShowInitialBalanceModal(true)}
+              className="text-[10px] bg-white/20 hover:bg-white/30 px-2.5 py-1 rounded-lg font-semibold backdrop-blur-sm transition flex items-center gap-1 active:scale-95"
+            >
+              <RotateCcw size={12} /> Saldo Awal: {formatRupiah(initialBalance)}
+            </button>
           </div>
-          <h2 className="text-2xl font-bold mb-3">{formatRupiah(monthIncome - monthExpense)}</h2>
+          <h2 className="text-2xl font-bold mb-3">{formatRupiah(initialBalance + monthIncome - monthExpense)}</h2>
           <div className="grid grid-cols-2 gap-2 text-xs border-t border-white/20 pt-2 opacity-90">
             <div>
               <span className="block text-[10px] opacity-75">Total Masuk</span>
@@ -712,26 +770,30 @@ export default function App() {
             </div>
           </div>
 
+          {/* Transaksi 1 Bulan Full */}
           <div>
             <div className="flex justify-between items-center mb-3">
               <h3 className="text-sm font-bold text-slate-700 flex items-center gap-1">
-                <Calendar size={16} /> Catatan Per Hari
+                <Calendar size={16} /> Catatan 1 Bulan Full ({filterMonth})
               </h3>
-              <button onClick={() => setActiveTab('riwayat')} className="text-xs text-teal-600 font-semibold hover:underline">
-                Lihat Semua
-              </button>
+              <input 
+                type="month" 
+                value={filterMonth}
+                onChange={(e) => setFilterMonth(e.target.value)}
+                className="text-xs font-semibold bg-white border p-1 rounded-lg text-slate-600 focus:outline-teal-500"
+              />
             </div>
 
             {loading ? (
               <p className="text-center text-xs text-slate-400 py-6">Memuat data...</p>
             ) : groupedTransactions.length === 0 ? (
               <div className="text-center py-8 bg-white rounded-2xl border p-4">
-                <p className="text-sm font-semibold text-slate-600">Belum ada catatan</p>
+                <p className="text-sm font-semibold text-slate-600">Belum ada catatan bulan ini</p>
                 <p className="text-xs text-slate-400 mt-1">Tekan tombol (+) di bawah untuk mulai mencatat.</p>
               </div>
             ) : (
               <div className="space-y-4">
-                {groupedTransactions.slice(0, 5).map((group) => (
+                {groupedTransactions.map((group) => (
                   <div key={group.date} className="space-y-2">
                     <div className="flex justify-between items-center bg-slate-200/60 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-600">
                       <span className="flex items-center gap-1.5">
@@ -865,10 +927,9 @@ export default function App() {
         </div>
       )}
 
-      {/* TAB: FITUR LAIN (UTANG & PIUTANG + GOALS) */}
+      {/* TAB: FITUR LAIN */}
       {activeTab === 'fitur_lain' && (
         <div className="p-4 space-y-4">
-          {/* Sub Switcher Utang vs Goals */}
           <div className="grid grid-cols-2 gap-2 p-1 bg-white border rounded-2xl text-xs font-bold shadow-sm">
             <button
               onClick={() => setSubTabFitur('utang')}
@@ -884,10 +945,8 @@ export default function App() {
             </button>
           </div>
 
-          {/* SUBTAB UTANG & PIUTANG */}
           {subTabFitur === 'utang' && (
             <div className="space-y-4">
-              {/* Summary Card Utang & Piutang */}
               <div className="grid grid-cols-2 gap-2">
                 <div className="bg-white p-3.5 rounded-2xl border shadow-sm">
                   <span className="text-[10px] font-bold text-slate-400 uppercase block">Utang Saya (Belum Lunas)</span>
@@ -899,7 +958,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Main Card Utang & Piutang */}
               <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
                 <div className="flex justify-between items-center">
                   <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Catatan Utang & Piutang</h3>
@@ -956,7 +1014,6 @@ export default function App() {
             </div>
           )}
 
-          {/* SUBTAB GOALS / TARGET IMPIAN */}
           {subTabFitur === 'goals' && (
             <div className="space-y-4">
               <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-3">
@@ -1237,6 +1294,54 @@ export default function App() {
           <List size={18} /> Riwayat
         </button>
       </div>
+
+      {/* MODAL SALDO AWAL BULAN */}
+      {showInitialBalanceModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-in fade-in duration-200">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-base font-bold text-slate-800">Atur Saldo Awal Bulan</h3>
+              <button onClick={() => setShowInitialBalanceModal(false)} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
+            </div>
+
+            <form onSubmit={handleSaveInitialBalance} className="space-y-4">
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">
+                  Nominal Saldo Awal (Rp)
+                </label>
+                <input 
+                  type="number" 
+                  placeholder="0"
+                  value={inputInitialBalance}
+                  onChange={(e) => setInputInitialBalance(e.target.value)}
+                  className="w-full p-2.5 text-xs bg-slate-50 border rounded-xl font-medium focus:outline-teal-500"
+                  required
+                />
+              </div>
+
+              <div className="flex justify-between items-center bg-slate-50 p-3 rounded-2xl border">
+                <span className="text-xs font-semibold text-slate-600">Ingin mulai dari 0?</span>
+                <button
+                  type="button"
+                  onClick={handleResetInitialBalanceToZero}
+                  className="text-xs bg-rose-50 text-rose-600 hover:bg-rose-100 px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1"
+                >
+                  <RotateCcw size={12} /> Set Ke Rp 0
+                </button>
+              </div>
+
+              <div className="flex gap-2 pt-1">
+                <button type="button" onClick={() => setShowInitialBalanceModal(false)} className="w-1/2 py-2.5 border rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100">
+                  Batal
+                </button>
+                <button type="submit" className="w-1/2 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs shadow-md transition">
+                  Simpan Saldo Awal
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL UTANG & PIUTANG */}
       {showDebtModal && (
