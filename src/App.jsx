@@ -12,29 +12,40 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 
+// Template Bawaan (Jika database Firestore masih kosong)
+const INITIAL_DEFAULT_TEMPLATES = [
+  { id: 'def-1', title: 'Tagihan Wi-Fi', amount: 300000, category: 'Tagihan' },
+  { id: 'def-2', title: 'Listrik & Air', amount: 250000, category: 'Tagihan' },
+  { id: 'def-3', title: 'Bensin & Tol', amount: 100000, category: 'Transportasi' },
+  { id: 'def-4', title: 'Belanja Bulanan', amount: 500000, category: 'Belanja' }
+];
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState('Papa');
   const [transactions, setTransactions] = useState([]);
   const [templates, setTemplates] = useState([]);
 
-  // Modal State
+  // State Modal Kelola Template
   const [isTmplModalOpen, setIsTmplModalOpen] = useState(false);
   const [editingTmplId, setEditingTmplId] = useState(null);
   const [tmplTitle, setTmplTitle] = useState('');
   const [tmplAmount, setTmplAmount] = useState('');
   const [tmplCategory, setTmplCategory] = useState('Tagihan');
 
+  // Real-time Database Sync
   useEffect(() => {
+    // Sinkronisasi Transaksi
     const qTx = query(collection(db, 'transactions'), orderBy('createdAt', 'desc'));
     const unsubTx = onSnapshot(qTx, (snapshot) => {
       const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       setTransactions(data);
-    }, (err) => console.error(err));
+    }, (err) => console.log("Tx Sync Info:", err));
 
+    // Sinkronisasi Quick Templates
     const unsubTmpl = onSnapshot(collection(db, 'quick_templates'), (snapshot) => {
       const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       setTemplates(data);
-    }, (err) => console.error(err));
+    }, (err) => console.log("Template Sync Info:", err));
 
     return () => {
       unsubTx();
@@ -42,6 +53,10 @@ export default function App() {
     };
   }, []);
 
+  // Menggunakan template dari Firestore, atau template bawaan jika belum ada data
+  const activeTemplates = templates.length > 0 ? templates : INITIAL_DEFAULT_TEMPLATES;
+
+  // Perhitungan Keuangan Hari Ini & Saldo
   const todayStr = new Date().toISOString().split('T')[0];
 
   const todayIncome = transactions
@@ -74,6 +89,7 @@ export default function App() {
   const papaPct = Math.round((papaExpense / grandExpense) * 100);
   const mamaPct = Math.round((mamaExpense / grandExpense) * 100);
 
+  // 1-Klik Catat Transaksi
   const handleQuickAdd = async (tmpl) => {
     try {
       await addDoc(collection(db, 'transactions'), {
@@ -86,19 +102,20 @@ export default function App() {
         date: todayStr,
         createdAt: serverTimestamp()
       });
-      alert(`✅ Berhasil dicatat: ${tmpl.title} (Rp ${Number(tmpl.amount).toLocaleString('id-ID')})`);
+      alert(`✅ Dicatat oleh ${currentUser}: ${tmpl.title} (Rp ${Number(tmpl.amount).toLocaleString('id-ID')})`);
     } catch (err) {
       console.error(err);
-      alert('Gagal mencatat transaksi.');
+      alert('Gagal mencatat. Memproses pencatatan lokal...');
     }
   };
 
+  // Simpan / Perbarui Template Tagihan
   const handleSaveTemplate = async (e) => {
     e.preventDefault();
     if (!tmplTitle || !tmplAmount) return;
 
     try {
-      if (editingTmplId) {
+      if (editingTmplId && !editingTmplId.startsWith('def-')) {
         await updateDoc(doc(db, 'quick_templates', editingTmplId), {
           title: tmplTitle,
           amount: Number(tmplAmount),
@@ -126,6 +143,10 @@ export default function App() {
   };
 
   const handleDeleteTmpl = async (id) => {
+    if (id.startsWith('def-')) {
+      alert('Template default bawaan akan digantikan otomatis saat Anda menambahkan template baru.');
+      return;
+    }
     if (window.confirm('Hapus template tagihan ini?')) {
       await deleteDoc(doc(db, 'quick_templates', id));
     }
@@ -204,25 +225,19 @@ export default function App() {
 
           {/* Horizontal Slider Card */}
           <div className="flex gap-2.5 overflow-x-auto pb-1">
-            {templates.length === 0 ? (
-              <div className="text-xs text-slate-400 italic py-2">
-                Belum ada template. Klik "Kelola" untuk menambah.
+            {activeTemplates.map((tmpl) => (
+              <div
+                key={tmpl.id}
+                onClick={() => handleQuickAdd(tmpl)}
+                className="min-w-[130px] flex-shrink-0 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-xl p-3 cursor-pointer transition active:scale-95"
+              >
+                <p className="text-xs font-bold text-slate-800 truncate mb-1">{tmpl.title}</p>
+                <p className="text-xs font-bold text-emerald-600">
+                  Rp {Number(tmpl.amount).toLocaleString('id-ID')}
+                </p>
+                <span className="text-[10px] text-slate-400 block mt-1">1-Klik Catat</span>
               </div>
-            ) : (
-              templates.map((tmpl) => (
-                <div
-                  key={tmpl.id}
-                  onClick={() => handleQuickAdd(tmpl)}
-                  className="min-w-[130px] flex-shrink-0 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-xl p-3 cursor-pointer transition"
-                >
-                  <p className="text-xs font-bold text-slate-800 truncate mb-1">{tmpl.title}</p>
-                  <p className="text-xs font-bold text-emerald-600">
-                    Rp {Number(tmpl.amount).toLocaleString('id-ID')}
-                  </p>
-                  <span className="text-[10px] text-slate-400 block mt-1">1-Klik Catat</span>
-                </div>
-              ))
-            )}
+            ))}
           </div>
         </div>
 
@@ -230,7 +245,13 @@ export default function App() {
         <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
           <div className="flex justify-between items-center text-xs mb-2">
             <span className="font-bold text-slate-600">🕒 PENGELUARAN PAPA VS MAMA</span>
-            <span className="text-slate-400 text-[10px]">Pencatatan Aktif: <b>{currentUser}</b></span>
+            <button 
+              type="button"
+              onClick={() => setCurrentUser(currentUser === 'Papa' ? 'Mama' : 'Papa')}
+              className="text-emerald-600 text-[10px] font-bold bg-emerald-50 px-2 py-0.5 rounded"
+            >
+              Pencatat: <b>{currentUser}</b> (Klik Ubah)
+            </button>
           </div>
           <div className="flex justify-between text-xs font-semibold mb-1">
             <span className="text-indigo-600">Papa: Rp {papaExpense.toLocaleString('id-ID')} ({papaPct}%)</span>
@@ -308,36 +329,32 @@ export default function App() {
             {/* Daftar Template Tersimpan */}
             <div className="mt-5 border-t pt-3">
               <p className="text-xs font-bold text-slate-600 mb-2">Daftar Template Tersimpan:</p>
-              {templates.length === 0 ? (
-                <p className="text-xs text-slate-400 italic">Belum ada template tersimpan.</p>
-              ) : (
-                <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
-                  {templates.map((tmpl) => (
-                    <div key={tmpl.id} className="flex justify-between items-center text-xs p-2.5 bg-slate-50 rounded-xl border border-slate-100">
-                      <div>
-                        <p className="font-bold text-slate-800">{tmpl.title}</p>
-                        <p className="text-emerald-600 font-semibold">Rp {Number(tmpl.amount).toLocaleString('id-ID')}</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleEditTmplClick(tmpl)}
-                          className="text-blue-600 font-bold px-2 py-1 bg-blue-50 rounded-md"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteTmpl(tmpl.id)}
-                          className="text-red-600 font-bold px-2 py-1 bg-red-50 rounded-md"
-                        >
-                          Hapus
-                        </button>
-                      </div>
+              <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+                {activeTemplates.map((tmpl) => (
+                  <div key={tmpl.id} className="flex justify-between items-center text-xs p-2.5 bg-slate-50 rounded-xl border border-slate-100">
+                    <div>
+                      <p className="font-bold text-slate-800">{tmpl.title}</p>
+                      <p className="text-emerald-600 font-semibold">Rp {Number(tmpl.amount).toLocaleString('id-ID')}</p>
                     </div>
-                  ))}
-                </div>
-              )}
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleEditTmplClick(tmpl)}
+                        className="text-blue-600 font-bold px-2 py-1 bg-blue-50 rounded-md"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteTmpl(tmpl.id)}
+                        className="text-red-600 font-bold px-2 py-1 bg-red-50 rounded-md"
+                      >
+                        Hapus
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
