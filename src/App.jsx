@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from './firebase'; 
+import { db } from './firebase'; // Pastikan path file firebase.js Anda sesuai
 import { 
   collection, 
   addDoc, 
@@ -12,40 +12,35 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 
-// Template Bawaan (Jika database Firestore masih kosong)
-const INITIAL_DEFAULT_TEMPLATES = [
-  { id: 'def-1', title: 'Tagihan Wi-Fi', amount: 300000, category: 'Tagihan' },
-  { id: 'def-2', title: 'Listrik & Air', amount: 250000, category: 'Tagihan' },
-  { id: 'def-3', title: 'Bensin & Tol', amount: 100000, category: 'Transportasi' },
-  { id: 'def-4', title: 'Belanja Bulanan', amount: 500000, category: 'Belanja' }
-];
-
 export default function App() {
-  const [currentUser, setCurrentUser] = useState('Papa');
+  // State Utama
+  const [currentUser, setCurrentUser] = useState('Papa'); // Default pencatat
   const [transactions, setTransactions] = useState([]);
   const [templates, setTemplates] = useState([]);
 
-  // State Modal Kelola Template
+  // State Modal Template Tagihan Cepat
   const [isTmplModalOpen, setIsTmplModalOpen] = useState(false);
   const [editingTmplId, setEditingTmplId] = useState(null);
   const [tmplTitle, setTmplTitle] = useState('');
   const [tmplAmount, setTmplAmount] = useState('');
   const [tmplCategory, setTmplCategory] = useState('Tagihan');
 
-  // Real-time Database Sync
+  // -------------------------------------------------------------
+  // 1. SYNC REALTIME FIRESTORE
+  // -------------------------------------------------------------
   useEffect(() => {
-    // Sinkronisasi Transaksi
+    // Read Transactions
     const qTx = query(collection(db, 'transactions'), orderBy('createdAt', 'desc'));
     const unsubTx = onSnapshot(qTx, (snapshot) => {
       const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       setTransactions(data);
-    }, (err) => console.log("Tx Sync Info:", err));
+    });
 
-    // Sinkronisasi Quick Templates
+    // Read Quick Templates
     const unsubTmpl = onSnapshot(collection(db, 'quick_templates'), (snapshot) => {
       const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       setTemplates(data);
-    }, (err) => console.log("Template Sync Info:", err));
+    });
 
     return () => {
       unsubTx();
@@ -53,12 +48,11 @@ export default function App() {
     };
   }, []);
 
-  // Menggunakan template dari Firestore, atau template bawaan jika belum ada data
-  const activeTemplates = templates.length > 0 ? templates : INITIAL_DEFAULT_TEMPLATES;
-
-  // Perhitungan Keuangan Hari Ini & Saldo
+  // -------------------------------------------------------------
+  // 2. HITUNG RINGKASAN KEUANGAN
+  // -------------------------------------------------------------
   const todayStr = new Date().toISOString().split('T')[0];
-
+  
   const todayIncome = transactions
     .filter(t => t.date === todayStr && t.type === 'income')
     .reduce((sum, t) => sum + Number(t.amount || 0), 0);
@@ -89,7 +83,10 @@ export default function App() {
   const papaPct = Math.round((papaExpense / grandExpense) * 100);
   const mamaPct = Math.round((mamaExpense / grandExpense) * 100);
 
-  // 1-Klik Catat Transaksi
+  // -------------------------------------------------------------
+  // 3. HANDLER TEMPLATE TAGIHAN CEPAT
+  // -------------------------------------------------------------
+  // 1-Klik Catat dari Card Template
   const handleQuickAdd = async (tmpl) => {
     try {
       await addDoc(collection(db, 'transactions'), {
@@ -102,37 +99,33 @@ export default function App() {
         date: todayStr,
         createdAt: serverTimestamp()
       });
-      alert(`✅ Dicatat oleh ${currentUser}: ${tmpl.title} (Rp ${Number(tmpl.amount).toLocaleString('id-ID')})`);
+      alert(`✅ Berhasil dicatat: ${tmpl.title} (Rp ${Number(tmpl.amount).toLocaleString('id-ID')}) oleh ${currentUser}`);
     } catch (err) {
       console.error(err);
-      alert('Gagal mencatat. Memproses pencatatan lokal...');
+      alert('Gagal mencatat transaksi.');
     }
   };
 
-  // Simpan / Perbarui Template Tagihan
+  // Simpan / Edit Template
   const handleSaveTemplate = async (e) => {
     e.preventDefault();
     if (!tmplTitle || !tmplAmount) return;
 
-    try {
-      if (editingTmplId && !editingTmplId.startsWith('def-')) {
-        await updateDoc(doc(db, 'quick_templates', editingTmplId), {
-          title: tmplTitle,
-          amount: Number(tmplAmount),
-          category: tmplCategory
-        });
-      } else {
-        await addDoc(collection(db, 'quick_templates'), {
-          title: tmplTitle,
-          amount: Number(tmplAmount),
-          category: tmplCategory
-        });
-      }
-      closeTmplModal();
-    } catch (err) {
-      console.error(err);
-      alert('Gagal menyimpan template.');
+    if (editingTmplId) {
+      await updateDoc(doc(db, 'quick_templates', editingTmplId), {
+        title: tmplTitle,
+        amount: Number(tmplAmount),
+        category: tmplCategory
+      });
+    } else {
+      await addDoc(collection(db, 'quick_templates'), {
+        title: tmplTitle,
+        amount: Number(tmplAmount),
+        category: tmplCategory
+      });
     }
+
+    closeTmplModal();
   };
 
   const handleEditTmplClick = (tmpl) => {
@@ -143,10 +136,6 @@ export default function App() {
   };
 
   const handleDeleteTmpl = async (id) => {
-    if (id.startsWith('def-')) {
-      alert('Template default bawaan akan digantikan otomatis saat Anda menambahkan template baru.');
-      return;
-    }
     if (window.confirm('Hapus template tagihan ini?')) {
       await deleteDoc(doc(db, 'quick_templates', id));
     }
@@ -162,18 +151,20 @@ export default function App() {
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-slate-50 pb-24 text-slate-800 font-sans relative">
+      
       {/* HEADER */}
       <div className="p-5 bg-white flex justify-between items-center shadow-sm">
         <div>
           <h1 className="text-xl font-bold text-slate-900 tracking-tight">Catat Bareng</h1>
           <p className="text-[11px] font-bold text-slate-400 tracking-wider">KEUANGAN PAPA & MAMA</p>
         </div>
-        <button type="button" className="bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-full shadow-sm flex items-center gap-1">
+        <button className="bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-full shadow-sm flex items-center gap-1">
           <span>🔗</span> WA Rekap
         </button>
       </div>
 
       <div className="p-4 space-y-3">
+        
         {/* CARD: KEUANGAN HARI INI */}
         <div className="bg-gradient-to-r from-emerald-600 to-teal-500 rounded-2xl p-4 text-white shadow-md">
           <div className="flex justify-between items-center text-xs opacity-90 mb-3">
@@ -215,7 +206,6 @@ export default function App() {
               </h3>
             </div>
             <button
-              type="button"
               onClick={() => setIsTmplModalOpen(true)}
               className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full hover:bg-emerald-100 transition"
             >
@@ -224,20 +214,26 @@ export default function App() {
           </div>
 
           {/* Horizontal Slider Card */}
-          <div className="flex gap-2.5 overflow-x-auto pb-1">
-            {activeTemplates.map((tmpl) => (
-              <div
-                key={tmpl.id}
-                onClick={() => handleQuickAdd(tmpl)}
-                className="min-w-[130px] flex-shrink-0 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-xl p-3 cursor-pointer transition active:scale-95"
-              >
-                <p className="text-xs font-bold text-slate-800 truncate mb-1">{tmpl.title}</p>
-                <p className="text-xs font-bold text-emerald-600">
-                  Rp {Number(tmpl.amount).toLocaleString('id-ID')}
-                </p>
-                <span className="text-[10px] text-slate-400 block mt-1">1-Klik Catat</span>
+          <div className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-none">
+            {templates.length === 0 ? (
+              <div className="text-xs text-slate-400 italic py-2">
+                Belum ada template. Klik "Kelola" untuk menambah.
               </div>
-            ))}
+            ) : (
+              templates.map((tmpl) => (
+                <div
+                  key={tmpl.id}
+                  onClick={() => handleQuickAdd(tmpl)}
+                  className="min-w-[130px] flex-shrink-0 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-xl p-3 cursor-pointer transition"
+                >
+                  <p className="text-xs font-bold text-slate-800 truncate mb-1">{tmpl.title}</p>
+                  <p className="text-xs font-bold text-emerald-600">
+                    Rp {Number(tmpl.amount).toLocaleString('id-ID')}
+                  </p>
+                  <span className="text-[10px] text-slate-400 block mt-1">1-Klik Catat</span>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
@@ -245,13 +241,7 @@ export default function App() {
         <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
           <div className="flex justify-between items-center text-xs mb-2">
             <span className="font-bold text-slate-600">🕒 PENGELUARAN PAPA VS MAMA</span>
-            <button 
-              type="button"
-              onClick={() => setCurrentUser(currentUser === 'Papa' ? 'Mama' : 'Papa')}
-              className="text-emerald-600 text-[10px] font-bold bg-emerald-50 px-2 py-0.5 rounded"
-            >
-              Pencatat: <b>{currentUser}</b> (Klik Ubah)
-            </button>
+            <span className="text-slate-400 text-[10px]">Pencatatan Aktif: <b>{currentUser}</b></span>
           </div>
           <div className="flex justify-between text-xs font-semibold mb-1">
             <span className="text-indigo-600">Papa: Rp {papaExpense.toLocaleString('id-ID')} ({papaPct}%)</span>
@@ -262,17 +252,19 @@ export default function App() {
             <div className="bg-pink-500 h-full transition-all duration-300" style={{ width: `${mamaPct}%` }}></div>
           </div>
         </div>
+
       </div>
 
       {/* MODAL KELOLA & TAMBAH TEMPLATE */}
       {isTmplModalOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-sm rounded-2xl p-5 shadow-2xl">
+          <div className="bg-white w-full max-w-sm rounded-2xl p-5 shadow-2xl animate-in fade-in zoom-in duration-200">
+            
             <div className="flex justify-between items-center mb-4">
               <h4 className="font-bold text-slate-800 text-base">
                 {editingTmplId ? '✏️ Edit Template' : '➕ Kelola Template Tagihan'}
               </h4>
-              <button type="button" onClick={closeTmplModal} className="text-slate-400 text-lg font-bold">✕</button>
+              <button onClick={closeTmplModal} className="text-slate-400 text-lg font-bold">✕</button>
             </div>
 
             {/* Form Tambah / Edit */}
@@ -326,67 +318,72 @@ export default function App() {
               </div>
             </form>
 
-            {/* Daftar Template Tersimpan */}
+            {/* Daftar Template Tersimpan (Untuk Edit / Hapus) */}
             <div className="mt-5 border-t pt-3">
               <p className="text-xs font-bold text-slate-600 mb-2">Daftar Template Tersimpan:</p>
-              <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
-                {activeTemplates.map((tmpl) => (
-                  <div key={tmpl.id} className="flex justify-between items-center text-xs p-2.5 bg-slate-50 rounded-xl border border-slate-100">
-                    <div>
-                      <p className="font-bold text-slate-800">{tmpl.title}</p>
-                      <p className="text-emerald-600 font-semibold">Rp {Number(tmpl.amount).toLocaleString('id-ID')}</p>
+              {templates.length === 0 ? (
+                <p className="text-xs text-slate-400 italic">Belum ada template tersimpan.</p>
+              ) : (
+                <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+                  {templates.map((tmpl) => (
+                    <div key={tmpl.id} className="flex justify-between items-center text-xs p-2.5 bg-slate-50 rounded-xl border border-slate-100">
+                      <div>
+                        <p className="font-bold text-slate-800">{tmpl.title}</p>
+                        <p className="text-emerald-600 font-semibold">Rp {Number(tmpl.amount).toLocaleString('id-ID')}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleEditTmplClick(tmpl)}
+                          className="text-blue-600 font-bold px-2 py-1 bg-blue-50 rounded-md"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTmpl(tmpl.id)}
+                          className="text-red-600 font-bold px-2 py-1 bg-red-50 rounded-md"
+                        >
+                          Hapus
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleEditTmplClick(tmpl)}
-                        className="text-blue-600 font-bold px-2 py-1 bg-blue-50 rounded-md"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteTmpl(tmpl.id)}
-                        className="text-red-600 font-bold px-2 py-1 bg-red-50 rounded-md"
-                      >
-                        Hapus
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
+
           </div>
         </div>
       )}
 
       {/* NAVBAR BAWAH */}
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-100 flex justify-around items-center py-2 px-3 z-40">
-        <button type="button" className="flex flex-col items-center text-emerald-600 text-[10px] font-bold">
+        <button className="flex flex-col items-center text-emerald-600 text-[10px] font-bold">
           <span className="text-lg">🏠</span>
           Beranda
         </button>
-        <button type="button" className="flex flex-col items-center text-slate-400 text-[10px]">
+        <button className="flex flex-col items-center text-slate-400 text-[10px]">
           <span className="text-lg">🎯</span>
           Anggaran
         </button>
         <button 
-          type="button"
           onClick={() => setCurrentUser(currentUser === 'Papa' ? 'Mama' : 'Papa')}
           className="w-12 h-12 bg-emerald-500 rounded-full text-white text-xl font-bold flex items-center justify-center -mt-6 shadow-lg shadow-emerald-200 border-4 border-white"
           title="Klik untuk ubah pencatat Papa/Mama"
         >
           +
         </button>
-        <button type="button" className="flex flex-col items-center text-slate-400 text-[10px]">
+        <button className="flex flex-col items-center text-slate-400 text-[10px]">
           <span className="text-lg">🛠️</span>
           Fitur Lain
         </button>
-        <button type="button" className="flex flex-col items-center text-slate-400 text-[10px]">
+        <button className="flex flex-col items-center text-slate-400 text-[10px]">
           <span className="text-lg">📊</span>
           Statistik
         </button>
       </div>
+
     </div>
   );
 }
