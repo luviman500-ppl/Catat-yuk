@@ -13,7 +13,6 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 
-// Inisialisasi Firebase langsung di dalam App.jsx agar tidak perlu file terpisah
 const firebaseConfig = {
   apiKey: 'AIzaSyCatatYukF7daa',
   authDomain: 'catat-yuk-f7daa.firebaseapp.com',
@@ -43,8 +42,8 @@ const DEFAULT_TEMPLATES = [
 ];
 
 export default function App() {
-  const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD waktu lokal
-  const [selectedMonth, setSelectedMonth] = useState(todayStr.slice(0, 7)); // YYYY-MM
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  const [selectedMonth, setSelectedMonth] = useState(todayStr.slice(0, 7));
   const [activeTab, setActiveTab] = useState('beranda');
   const [toastMsg, setToastMsg] = useState('');
 
@@ -54,6 +53,9 @@ export default function App() {
   const [budgets, setBudgets] = useState({});
   const [initialBalances, setInitialBalances] = useState({});
   const [debts, setDebts] = useState([]);
+
+  // State Detail Kategori di Statistik
+  const [expandedStatCat, setExpandedStatCat] = useState(null);
 
   // Modal Edit & Tambah Template Tagihan Cepat
   const [isTmplModalOpen, setIsTmplModalOpen] = useState(false);
@@ -82,16 +84,14 @@ export default function App() {
   const [saldoInput, setSaldoInput] = useState('');
   const [debtName, setDebtName] = useState('');
   const [debtAmount, setDebtAmount] = useState('');
-  const [debtType, setDebtType] = useState('utang'); // utang | piutang
+  const [debtType, setDebtType] = useState('utang');
 
   const showToast = (msg) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(''), 3000);
   };
 
-  // Sinkronisasi Real-Time Firestore
   useEffect(() => {
-    // 1. Transaksi (tanpa orderBy Firestore agar data lama tanpa createdAt tetap terbaca)
     const unsubTx = onSnapshot(collection(db, 'transactions'), (snap) => {
       const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       list.sort((a, b) => {
@@ -103,7 +103,6 @@ export default function App() {
       setTransactions(list);
     });
 
-    // 2. Template Tagihan Cepat + Seed Awal jika kosong
     const tmplRef = collection(db, 'quick_templates');
     getDocs(tmplRef).then(async (snap) => {
       if (snap.empty && !localStorage.getItem('catat_tmpl_seeded_v1')) {
@@ -118,7 +117,6 @@ export default function App() {
       setQuickTemplates(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
 
-    // 3. Anggaran & Saldo Awal
     const unsubBudgets = onSnapshot(collection(db, 'budgets'), (snap) => {
       const map = {};
       snap.docs.forEach((d) => {
@@ -135,7 +133,6 @@ export default function App() {
       setInitialBalances(map);
     });
 
-    // 4. Utang & Piutang
     const unsubDebts = onSnapshot(collection(db, 'debts'), (snap) => {
       setDebts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
@@ -149,7 +146,6 @@ export default function App() {
     };
   }, []);
 
-  // Daftar semua kategori pengeluaran (bawaan + kategori kustom dari template/transaksi)
   const allExpenseCategories = Array.from(
     new Set([
       ...BASE_CATEGORIES,
@@ -158,7 +154,6 @@ export default function App() {
     ])
   );
 
-  // Filter Transaksi Bulan Terpilih & Hari Ini
   const monthTransactions = transactions.filter((t) => (t.date || '').startsWith(selectedMonth));
   const todayTransactions = transactions.filter((t) => t.date === todayStr);
 
@@ -178,7 +173,6 @@ export default function App() {
     .reduce((s, t) => s + Number(t.amount || 0), 0);
   const totalSaldo = saldoAwal + totalMasuk - totalKeluar;
 
-  // Perbandingan Papa vs Mama
   const papaExpense = monthTransactions
     .filter((t) => t.type === 'expense' && (t.user === 'Papa' || !t.user))
     .reduce((s, t) => s + Number(t.amount || 0), 0);
@@ -189,11 +183,9 @@ export default function App() {
   const papaPct = totalCoupleExpense > 0 ? Math.round((papaExpense / totalCoupleExpense) * 100) : 0;
   const mamaPct = totalCoupleExpense > 0 ? 100 - papaPct : 0;
 
-  // Perhitungan Anggaran
   const totalBudgetLimit = Object.values(budgets).reduce((s, v) => s + Number(v || 0), 0);
   const sisaTotalAnggaran = totalBudgetLimit - totalKeluar;
 
-  // Navigasi Bulan
   const changeMonth = (delta) => {
     const [y, m] = selectedMonth.split('-').map(Number);
     const d = new Date(y, m - 1 + delta, 1);
@@ -360,7 +352,6 @@ export default function App() {
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  // Kelompokkan transaksi per tanggal
   const groupedTransactions = monthTransactions.reduce((groups, tx) => {
     const d = tx.date || 'Tanpa Tanggal';
     if (!groups[d]) groups[d] = [];
@@ -450,7 +441,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* CARD 3: TEMPLATE TAGIHAN CEPAT (EDITABLE & CUSTOM CATEGORY) */}
+          {/* CARD 3: TEMPLATE TAGIHAN CEPAT */}
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
             <div className="flex justify-between items-center mb-3">
               <div className="flex items-center gap-1.5">
@@ -478,7 +469,6 @@ export default function App() {
                   onClick={() => handleQuickCatat(tmpl)}
                   className="min-w-[140px] flex-shrink-0 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-xl p-3 cursor-pointer transition relative active:scale-95"
                 >
-                  {/* Tombol Edit Cepat per Kartu */}
                   <button
                     type="button"
                     onClick={(e) => {
@@ -572,7 +562,13 @@ export default function App() {
                             <p className="text-xs font-bold text-slate-800">{tx.title}</p>
                             <p className="text-[10px] text-slate-500">
                               {tx.category} •{' '}
-                              <span className={tx.user === 'Mama' ? 'text-pink-600 font-bold' : 'text-indigo-600 font-bold'}>
+                              <span
+                                className={
+                                  tx.user === 'Mama'
+                                    ? 'text-pink-600 font-bold'
+                                    : 'text-indigo-600 font-bold'
+                                }
+                              >
                                 {tx.user || 'Papa'}
                               </span>
                             </p>
@@ -583,7 +579,8 @@ export default function App() {
                                 tx.type === 'income' ? 'text-emerald-600' : 'text-rose-600'
                               }`}
                             >
-                              {tx.type === 'income' ? '+' : '-'}Rp {Number(tx.amount).toLocaleString('id-ID')}
+                              {tx.type === 'income' ? '+' : '-'}Rp{' '}
+                              {Number(tx.amount).toLocaleString('id-ID')}
                             </span>
                             <button
                               type="button"
@@ -653,10 +650,11 @@ export default function App() {
       {/* ================= TAB: FITUR LAIN ================= */}
       {activeTab === 'fitur' && (
         <div className="p-4 space-y-3">
-          {/* Atur Saldo Awal */}
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex justify-between items-center">
             <div>
-              <h3 className="text-xs font-bold text-slate-800">Saldo Awal Periode ({selectedMonth})</h3>
+              <h3 className="text-xs font-bold text-slate-800">
+                Saldo Awal Periode ({selectedMonth})
+              </h3>
               <p className="text-sm font-extrabold text-indigo-600 mt-0.5">
                 Rp {saldoAwal.toLocaleString('id-ID')}
               </p>
@@ -673,7 +671,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* Catatan Utang & Piutang */}
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
             <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-3">
               Catatan Utang & Piutang
@@ -693,7 +690,9 @@ export default function App() {
                   type="button"
                   onClick={() => setDebtType('piutang')}
                   className={`py-1.5 rounded-lg text-xs font-bold ${
-                    debtType === 'piutang' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'
+                    debtType === 'piutang'
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-slate-100 text-slate-600'
                   }`}
                 >
                   Piutang (Orang Pinjam)
@@ -725,13 +724,22 @@ export default function App() {
 
             <div className="space-y-2">
               {debts.map((d) => (
-                <div key={d.id} className="flex justify-between items-center p-2.5 bg-slate-50 rounded-xl text-xs">
+                <div
+                  key={d.id}
+                  className="flex justify-between items-center p-2.5 bg-slate-50 rounded-xl text-xs"
+                >
                   <div>
-                    <span className={`font-bold ${d.type === 'utang' ? 'text-rose-600' : 'text-emerald-600'}`}>
+                    <span
+                      className={`font-bold ${
+                        d.type === 'utang' ? 'text-rose-600' : 'text-emerald-600'
+                      }`}
+                    >
                       [{d.type.toUpperCase()}]
                     </span>{' '}
                     <span className="font-bold text-slate-800">{d.name}</span>
-                    <p className="text-slate-600 font-semibold">Rp {Number(d.amount).toLocaleString('id-ID')}</p>
+                    <p className="text-slate-600 font-semibold">
+                      Rp {Number(d.amount).toLocaleString('id-ID')}
+                    </p>
                   </div>
                   <button
                     type="button"
@@ -747,35 +755,114 @@ export default function App() {
         </div>
       )}
 
-      {/* ================= TAB: STATISTIK SEDERHANA ================= */}
+      {/* ================= TAB: STATISTIK (KLIK KATEGORI UNTUK DETAIL) ================= */}
       {activeTab === 'statistik' && (
         <div className="p-4 space-y-3">
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
-            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3">
-              Ringkasan Pengeluaran ({selectedMonth})
-            </h3>
-            {allExpenseCategories.map((cat) => {
-              const catTotal = monthTransactions
-                .filter((t) => t.type === 'expense' && t.category === cat)
-                .reduce((s, t) => s + Number(t.amount || 0), 0);
-              if (catTotal === 0) return null;
-              const pct = totalKeluar > 0 ? Math.round((catTotal / totalKeluar) * 100) : 0;
-              return (
-                <div key={cat} className="mb-3">
-                  <div className="flex justify-between text-xs font-bold mb-1">
-                    <span>{cat}</span>
-                    <span>
-                      Rp {catTotal.toLocaleString('id-ID')} ({pct}%)
-                    </span>
+            <div className="flex justify-between items-center mb-1">
+              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Ringkasan Pengeluaran ({selectedMonth})
+              </h3>
+              <span className="text-[11px] font-bold text-rose-600">
+                Total: Rp {totalKeluar.toLocaleString('id-ID')}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 mb-4">
+              Ketuk kategori untuk melihat rincian transaksinya.
+            </p>
+
+            <div className="space-y-2.5">
+              {allExpenseCategories.map((cat) => {
+                const catTransactions = monthTransactions.filter(
+                  (t) => t.type === 'expense' && t.category === cat
+                );
+                const catTotal = catTransactions.reduce(
+                  (s, t) => s + Number(t.amount || 0),
+                  0
+                );
+                if (catTotal === 0) return null;
+
+                const pct = totalKeluar > 0 ? Math.round((catTotal / totalKeluar) * 100) : 0;
+                const isExpanded = expandedStatCat === cat;
+
+                return (
+                  <div
+                    key={cat}
+                    className={`rounded-xl border transition overflow-hidden ${
+                      isExpanded
+                        ? 'border-emerald-300 bg-emerald-50/30'
+                        : 'border-slate-100 bg-slate-50/70'
+                    }`}
+                  >
+                    {/* Header Kategori (Klik untuk Buka/Tutup Rincian) */}
+                    <button
+                      type="button"
+                      onClick={() => setExpandedStatCat(isExpanded ? null : cat)}
+                      className="w-full text-left p-3 focus:outline-none"
+                    >
+                      <div className="flex justify-between items-center text-xs font-bold mb-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-800">{cat}</span>
+                          <span className="text-[10px] font-semibold text-slate-500 bg-white px-1.5 py-0.5 rounded border border-slate-200">
+                            {catTransactions.length}x
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-800">
+                            Rp {catTotal.toLocaleString('id-ID')} ({pct}%)
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {isExpanded ? '▲' : '▼'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                        <div
+                          className="bg-emerald-500 h-full transition-all duration-300"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </button>
+
+                    {/* Daftar Rincian Transaksi di Kategori Terpilih */}
+                    {isExpanded && (
+                      <div className="px-3 pb-3 pt-2 border-t border-emerald-100 space-y-1.5 bg-white">
+                        {catTransactions.map((tx) => (
+                          <div
+                            key={tx.id}
+                            className="flex justify-between items-center py-2 px-2.5 rounded-lg bg-slate-50 text-xs border border-slate-100"
+                          >
+                            <div>
+                              <p className="font-bold text-slate-800">{tx.title}</p>
+                              <p className="text-[10px] text-slate-400">
+                                {tx.date} •{' '}
+                                <span
+                                  className={
+                                    tx.user === 'Mama'
+                                      ? 'text-pink-600 font-bold'
+                                      : 'text-indigo-600 font-bold'
+                                  }
+                                >
+                                  {tx.user || 'Papa'}
+                                </span>
+                              </p>
+                            </div>
+                            <span className="font-extrabold text-rose-600">
+                              Rp {Number(tx.amount).toLocaleString('id-ID')}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                    <div className="bg-emerald-500 h-full" style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+
             {totalKeluar === 0 && (
-              <p className="text-xs text-slate-400 text-center py-4">Belum ada pengeluaran bulan ini.</p>
+              <p className="text-xs text-slate-400 text-center py-4">
+                Belum ada pengeluaran bulan ini.
+              </p>
             )}
           </div>
         </div>
@@ -877,7 +964,9 @@ export default function App() {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1">Pencatat Otomatis</label>
+                <label className="text-xs font-bold text-slate-600 block mb-1">
+                  Pencatat Otomatis
+                </label>
                 <div className="grid grid-cols-2 gap-2">
                   {['Papa', 'Mama'].map((person) => (
                     <button
@@ -899,14 +988,15 @@ export default function App() {
               <button
                 type="submit"
                 className={`w-full text-white font-bold text-sm py-2.5 rounded-xl transition ${
-                  editingTmplId ? 'bg-blue-600 hover:bg-blue-700' : 'bg-emerald-600 hover:bg-emerald-700'
+                  editingTmplId
+                    ? 'bg-blue-600 hover:bg-blue-700'
+                    : 'bg-emerald-600 hover:bg-emerald-700'
                 }`}
               >
                 {editingTmplId ? 'Simpan Perubahan' : '+ Simpan Template Baru'}
               </button>
             </form>
 
-            {/* Daftar Template Tersimpan */}
             <div className="mt-5 border-t pt-3">
               <p className="text-xs font-bold text-slate-600 mb-2">Daftar Template Tersimpan:</p>
               <div className="space-y-2">
@@ -989,7 +1079,9 @@ export default function App() {
                     setIsNewTxCat(false);
                   }}
                   className={`py-2 rounded-xl text-xs font-bold ${
-                    txType === 'income' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'
+                    txType === 'income'
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-slate-100 text-slate-600'
                   }`}
                 >
                   Pemasukan
