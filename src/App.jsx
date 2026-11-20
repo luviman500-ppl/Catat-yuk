@@ -68,8 +68,9 @@ export default function App() {
   const [tmplUser, setTmplUser] = useState('Papa');
   const tmplModalRef = useRef(null);
 
-  // Modal Tambah Transaksi Manual (+)
+  // Modal Tambah & Edit Transaksi (+)
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
+  const [editingTxId, setEditingTxId] = useState(null);
   const [txType, setTxType] = useState('expense');
   const [txTitle, setTxTitle] = useState('');
   const [txAmount, setTxAmount] = useState('');
@@ -151,6 +152,13 @@ export default function App() {
       ...BASE_CATEGORIES,
       ...quickTemplates.map((t) => t.category).filter(Boolean),
       ...transactions.filter((t) => t.type === 'expense').map((t) => t.category).filter(Boolean)
+    ])
+  );
+
+  const allIncomeCategories = Array.from(
+    new Set([
+      ...INCOME_CATEGORIES,
+      ...transactions.filter((t) => t.type === 'income').map((t) => t.category).filter(Boolean)
     ])
   );
 
@@ -275,7 +283,42 @@ export default function App() {
     }
   };
 
-  // === HANDLER TRANSAKSI MANUAL (+) ===
+  // === HANDLER TAMBAH & EDIT TRANSAKSI ===
+  const openNewTransactionModal = () => {
+    setEditingTxId(null);
+    setTxType('expense');
+    setTxTitle('');
+    setTxAmount('');
+    setTxCategory('Makanan');
+    setIsNewTxCat(false);
+    setCustomTxCat('');
+    setTxUser('Papa');
+    setTxDate(todayStr);
+    setIsTxModalOpen(true);
+  };
+
+  const openEditTransactionModal = (tx) => {
+    setEditingTxId(tx.id);
+    setTxType(tx.type || 'expense');
+    setTxTitle(tx.title || '');
+    setTxAmount(tx.amount || '');
+    setTxCategory(tx.category || (tx.type === 'income' ? 'Gaji' : 'Makanan'));
+    setIsNewTxCat(false);
+    setCustomTxCat('');
+    setTxUser(tx.user || 'Papa');
+    setTxDate(tx.date || todayStr);
+    setIsTxModalOpen(true);
+  };
+
+  const closeTxModal = () => {
+    setEditingTxId(null);
+    setTxTitle('');
+    setTxAmount('');
+    setIsNewTxCat(false);
+    setCustomTxCat('');
+    setIsTxModalOpen(false);
+  };
+
   const handleSaveTransaction = async (e) => {
     e.preventDefault();
     if (!txTitle.trim() || !txAmount) return;
@@ -285,23 +328,28 @@ export default function App() {
         ? customTxCat.trim()
         : txCategory;
 
+    const payload = {
+      title: txTitle.trim(),
+      amount: Number(txAmount),
+      type: txType,
+      category: finalCat,
+      user: txUser,
+      date: txDate || todayStr
+    };
+
     try {
-      await addDoc(collection(db, 'transactions'), {
-        title: txTitle.trim(),
-        amount: Number(txAmount),
-        type: txType,
-        category: finalCat,
-        user: txUser,
-        paymentMethod: 'Tunai',
-        date: txDate || todayStr,
-        createdAt: serverTimestamp()
-      });
-      setTxTitle('');
-      setTxAmount('');
-      setIsNewTxCat(false);
-      setCustomTxCat('');
-      setIsTxModalOpen(false);
-      showToast('✅ Transaksi berhasil disimpan');
+      if (editingTxId) {
+        await updateDoc(doc(db, 'transactions', editingTxId), payload);
+        showToast('✅ Transaksi berhasil diperbarui');
+      } else {
+        await addDoc(collection(db, 'transactions'), {
+          ...payload,
+          paymentMethod: 'Tunai',
+          createdAt: serverTimestamp()
+        });
+        showToast('✅ Transaksi berhasil disimpan');
+      }
+      closeTxModal();
     } catch (err) {
       console.error(err);
       showToast('❌ Gagal menyimpan transaksi');
@@ -538,7 +586,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* CARD 6: RIWAYAT TRANSAKSI BULAN INI */}
+          {/* CARD 6: RIWAYAT TRANSAKSI BULAN INI (DENGAN TOTAL HARIAN & TOMBOL EDIT) */}
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
             <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-3">
               Riwayat Transaksi ({monthTransactions.length})
@@ -549,52 +597,87 @@ export default function App() {
               </p>
             ) : (
               <div className="space-y-4">
-                {Object.entries(groupedTransactions).map(([dateKey, items]) => (
-                  <div key={dateKey}>
-                    <p className="text-[11px] font-bold text-slate-400 mb-1.5">{dateKey}</p>
-                    <div className="space-y-2">
-                      {items.map((tx) => (
-                        <div
-                          key={tx.id}
-                          className="flex justify-between items-center p-2.5 rounded-xl bg-slate-50 border border-slate-100"
-                        >
-                          <div>
-                            <p className="text-xs font-bold text-slate-800">{tx.title}</p>
-                            <p className="text-[10px] text-slate-500">
-                              {tx.category} •{' '}
-                              <span
-                                className={
-                                  tx.user === 'Mama'
-                                    ? 'text-pink-600 font-bold'
-                                    : 'text-indigo-600 font-bold'
-                                }
-                              >
-                                {tx.user || 'Papa'}
-                              </span>
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={`text-xs font-extrabold ${
-                                tx.type === 'income' ? 'text-emerald-600' : 'text-rose-600'
-                              }`}
-                            >
-                              {tx.type === 'income' ? '+' : '-'}Rp{' '}
-                              {Number(tx.amount).toLocaleString('id-ID')}
+                {Object.entries(groupedTransactions).map(([dateKey, items]) => {
+                  const dayIncome = items
+                    .filter((t) => t.type === 'income')
+                    .reduce((s, t) => s + Number(t.amount || 0), 0);
+                  const dayExpense = items
+                    .filter((t) => t.type === 'expense')
+                    .reduce((s, t) => s + Number(t.amount || 0), 0);
+
+                  return (
+                    <div key={dateKey}>
+                      {/* Header Tanggal + Ringkasan Pemasukan & Pengeluaran Harian */}
+                      <div className="flex justify-between items-center bg-slate-100/80 px-2.5 py-1.5 rounded-lg mb-2">
+                        <span className="text-[11px] font-bold text-slate-600">{dateKey}</span>
+                        <div className="flex items-center gap-2 text-[10px] font-bold">
+                          {dayIncome > 0 && (
+                            <span className="text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">
+                              +Rp {dayIncome.toLocaleString('id-ID')}
                             </span>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteTransaction(tx.id, tx.title)}
-                              className="text-slate-300 hover:text-rose-500 text-xs px-1"
-                            >
-                              ✕
-                            </button>
-                          </div>
+                          )}
+                          {dayExpense > 0 && (
+                            <span className="text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100">
+                              -Rp {dayExpense.toLocaleString('id-ID')}
+                            </span>
+                          )}
                         </div>
-                      ))}
+                      </div>
+
+                      {/* Daftar Item Transaksi */}
+                      <div className="space-y-2">
+                        {items.map((tx) => (
+                          <div
+                            key={tx.id}
+                            className="flex justify-between items-center p-2.5 rounded-xl bg-slate-50 border border-slate-100"
+                          >
+                            <div className="min-w-0 pr-2">
+                              <p className="text-xs font-bold text-slate-800 truncate">{tx.title}</p>
+                              <p className="text-[10px] text-slate-500">
+                                {tx.category} •{' '}
+                                <span
+                                  className={
+                                    tx.user === 'Mama'
+                                      ? 'text-pink-600 font-bold'
+                                      : 'text-indigo-600 font-bold'
+                                  }
+                                >
+                                  {tx.user || 'Papa'}
+                                </span>
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <span
+                                className={`text-xs font-extrabold mr-1 ${
+                                  tx.type === 'income' ? 'text-emerald-600' : 'text-rose-600'
+                                }`}
+                              >
+                                {tx.type === 'income' ? '+' : '-'}Rp{' '}
+                                {Number(tx.amount).toLocaleString('id-ID')}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => openEditTransactionModal(tx)}
+                                title="Edit transaksi"
+                                className="text-[11px] bg-white border border-slate-200 hover:border-blue-300 text-blue-600 px-1.5 py-1 rounded-md"
+                              >
+                                ✏️
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteTransaction(tx.id, tx.title)}
+                                title="Hapus transaksi"
+                                className="text-[11px] bg-white border border-slate-200 hover:border-rose-300 text-slate-400 hover:text-rose-500 px-1.5 py-1 rounded-md"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -794,7 +877,6 @@ export default function App() {
                         : 'border-slate-100 bg-slate-50/70'
                     }`}
                   >
-                    {/* Header Kategori (Klik untuk Buka/Tutup Rincian) */}
                     <button
                       type="button"
                       onClick={() => setExpandedStatCat(isExpanded ? null : cat)}
@@ -824,7 +906,6 @@ export default function App() {
                       </div>
                     </button>
 
-                    {/* Daftar Rincian Transaksi di Kategori Terpilih */}
                     {isExpanded && (
                       <div className="px-3 pb-3 pt-2 border-t border-emerald-100 space-y-1.5 bg-white">
                         {catTransactions.map((tx) => (
@@ -1042,15 +1123,17 @@ export default function App() {
         </div>
       )}
 
-      {/* ================= MODAL TAMBAH TRANSAKSI MANUAL (+) ================= */}
+      {/* ================= MODAL TAMBAH & EDIT TRANSAKSI (+) ================= */}
       {isTxModalOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl p-5 shadow-2xl">
             <div className="flex justify-between items-center mb-4">
-              <h4 className="font-bold text-slate-800 text-base">Catat Transaksi Baru</h4>
+              <h4 className="font-bold text-slate-800 text-base">
+                {editingTxId ? '✏️ Edit Transaksi' : 'Catat Transaksi Baru'}
+              </h4>
               <button
                 type="button"
-                onClick={() => setIsTxModalOpen(false)}
+                onClick={closeTxModal}
                 className="text-slate-400 text-lg font-bold"
               >
                 ✕
@@ -1063,7 +1146,7 @@ export default function App() {
                   type="button"
                   onClick={() => {
                     setTxType('expense');
-                    setTxCategory('Makanan');
+                    if (!allExpenseCategories.includes(txCategory)) setTxCategory('Makanan');
                   }}
                   className={`py-2 rounded-xl text-xs font-bold ${
                     txType === 'expense' ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600'
@@ -1075,7 +1158,7 @@ export default function App() {
                   type="button"
                   onClick={() => {
                     setTxType('income');
-                    setTxCategory('Gaji');
+                    if (!allIncomeCategories.includes(txCategory)) setTxCategory('Gaji');
                     setIsNewTxCat(false);
                   }}
                   className={`py-2 rounded-xl text-xs font-bold ${
@@ -1140,7 +1223,7 @@ export default function App() {
                     onChange={(e) => setTxCategory(e.target.value)}
                     className="w-full border rounded-xl px-3 py-2 text-sm"
                   >
-                    {(txType === 'expense' ? allExpenseCategories : INCOME_CATEGORIES).map((c) => (
+                    {(txType === 'expense' ? allExpenseCategories : allIncomeCategories).map((c) => (
                       <option key={c} value={c}>
                         {c}
                       </option>
@@ -1174,9 +1257,11 @@ export default function App() {
 
               <button
                 type="submit"
-                className="w-full bg-emerald-600 text-white font-bold text-sm py-2.5 rounded-xl mt-2"
+                className={`w-full text-white font-bold text-sm py-2.5 rounded-xl mt-2 ${
+                  editingTxId ? 'bg-blue-600 hover:bg-blue-700' : 'bg-emerald-600 hover:bg-emerald-700'
+                }`}
               >
-                Simpan Transaksi
+                {editingTxId ? 'Simpan Perubahan' : 'Simpan Transaksi'}
               </button>
             </form>
           </div>
@@ -1242,7 +1327,7 @@ export default function App() {
         </button>
         <button
           type="button"
-          onClick={() => setIsTxModalOpen(true)}
+          onClick={openNewTransactionModal}
           className="w-12 h-12 bg-emerald-500 hover:bg-emerald-600 rounded-full text-white text-2xl font-bold flex items-center justify-center -mt-6 shadow-lg shadow-emerald-200 border-4 border-white"
         >
           +
